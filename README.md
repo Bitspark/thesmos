@@ -1,0 +1,82 @@
+# thesmos
+
+**The law of who may assert what, in which space.**
+
+This is a fresh implementation of the frozen Spaces authority model. It starts
+with one TypeScript SDK, declarative Logos law and Ontos evidence. The prior
+implementation is preserved separately as private `Bitspark/thesmos-legacy`.
+This repository contains none of its history or runtime compatibility paths.
+
+## Status
+
+Source preview, Node 24. The checker, asserter layer, optional Archon adapter
+and Logos proof client are implemented. **An anonymous npm install is not yet
+available:** the required `@bitspark/logos-contract@0.23.0` and optional client
+dependency `@bitspark/logos-kernel@0.23.0` are currently private GitHub packages.
+This source preview is not a public npm release. Other dependencies are public.
+
+With existing GitHub Packages read access, install the committed lockfile and
+run the complete gate:
+
+```sh
+npm ci --allow-remote=all
+npm run check
+```
+
+Keep the existing credential in the normal user or CI secret store. Do not add
+credentials to this repository. The lockfile selects exact Logos artifacts;
+Ontos stays on 0.13.0 to share the same Value implementation as Logos 0.23.0.
+
+## Receiver and caller
+
+```ts
+import { createSpacesVerifier } from "@bitspark/thesmos";
+import { authenticateArchon } from "@bitspark/thesmos/archon";
+
+const verifier = createSpacesVerifier({ root: configuredRoot, authenticate: authenticateArchon });
+const decision = verifier.verify({
+  query: { actor: authenticatedActor, space: operationSpace, statement: operationStatement },
+  proof: callerProof,
+});
+if (!decision.permitted) return; // The service performs its operation only after acceptance.
+```
+
+The service fixes the root, actor and operation. The proof cannot choose them.
+The optional caller entry constructs a finite proof using Logos:
+
+```ts
+import { prove } from "@bitspark/thesmos/client";
+const proof = await prove({ root: configuredRoot, query, bundles });
+```
+
+The receiver imports no search engine. The client requires Logos kernel, and
+the Archon adapter requires `@bitspark/archon@0.15.0`; both are optional peers.
+Custom authentication can implement the small callback instead. The adapter
+uses Archon's Ed25519ph context `thesmos/space-facts/v1`, exact Ontos payload
+bytes, public-key atoms and signature atoms. It adds no authority policy.
+
+Run `npm run build && npm run example`. The
+[document service](examples/document-service.ts) carries root → team → docs
+asserter outputs and Alice's grant to Bob. The receiver verifies the chain
+and the exact rename; changed actor or title is denied without a state change.
+The [device example](examples/device-service.ts) uses the same law for an
+unrelated operation. All example keys and identities are synthetic.
+
+## Layout and boundaries
+
+| Location | Responsibility |
+| --- | --- |
+| [law/](law/common-law.logos) | Frozen common law and compiled Ontos data; separate asserter template |
+| [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter |
+| [conformance/](conformance/frozen.json) | Frozen artifact pins; original corpus is `law/conformance.ontos` |
+| [core/ts/test/](core/ts/test/sdk.test.ts) | Core, asserter, mutation and client tests |
+| [docs/model.md](docs/model.md) | Model, trusted facts and implementation boundaries |
+| [docs/foundations.md](docs/foundations.md) | How the public Constellation contracts are used |
+
+There is no store, server, global lease, expiry default, role registry, separate
+publication permission or execution engine in the SDK. A timestamp is signed
+evidence; freshness remains separately modeled policy. The receiver owns the
+meaning and execution of its operation. Accounts can provide identity and
+generic confirmation without becoming a central permission endpoint.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

@@ -1,0 +1,19 @@
+{
+  "format": "spaces/proof/6",
+  "limits": {
+    "maxProofBytes": 1048576,
+    "maxWireDepth": 256,
+    "maxProofSteps": 2048,
+    "maxProofDepth": 256,
+    "maxTermDepth": 128
+  },
+  "results": {
+    "permitted": "permitted",
+    "invalid": "invalid-proof",
+    "lawMismatch": "law-mismatch",
+    "layerMismatch": "layer-mismatch",
+    "authentication": "authentication-failed",
+    "limit": "checking-limit",
+    "rejected": "proof-rejected"
+  }
+}

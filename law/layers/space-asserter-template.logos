@@ -1,0 +1,6 @@
+% Layer construction data for a clause in an authenticated space_facts output.
+% Specialize only for actual bundled clauses; prepend the original body.
+% S is the authenticated supplier; A remains the original author.
+% This is separate from the frozen core and defines no temporal policy.
+% @id supplied-assertion-template
+counts(A,P,H) :- authorized(A,H,P), authorized(S,supply_facts,P).

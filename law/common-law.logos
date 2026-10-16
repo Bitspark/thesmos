@@ -1,0 +1,51 @@
+% Spaces common law. The configured root is the only external premise.
+% Statements are native Logos compounds, paths are Logos lists, and arguments
+% are native Ontos values. The @id comments name clauses for proof references.
+
+% 1. The configured root holds every right.
+% @id root-authority
+authorized(R,F,S) :- root(R).
+
+% 2. A right extends down the space path.
+% @id descendant-authority
+authorized(I,F,T) :- authorized(I,F,S), path_prefix(S,T).
+
+% 3. Holding a right and being entitled to confer it are equivalent.
+% @id may-confer
+authorized(I,authorized(J,F,T),S) :- authorized(I,F,T).
+% @id holds-underlying
+authorized(I,F,T) :- authorized(I,authorized(J,F,T),S).
+
+% 4. A counting grant confers its underlying right, within its placement.
+% @id conferral
+authorized(I,F,T) :- counts(A,P,authorized(I,G,U)), underlying(G,U,F,T), path_prefix(P,T).
+
+% 5. Each supplied assertion H :- Body by A at S contributes the executable
+% clause counts(A,S,H) :- Body, authorized(A,H,S). A fact has an empty Body.
+% Its shared construction template is in assertion-template.logos; that
+% template is specialized only for actual inputs, never installed universally.
+% Input syntax and attribution are assumed valid; no publication right.
+
+% Structural definitions implement path containment, nested-right notation and
+% statement structure. They introduce no additional authority axiom.
+% @id prefix-empty
+path_prefix([],T).
+% @id prefix-step
+path_prefix([H|P],[H|T]) :- path_prefix(P,T).
+
+% Only authorized/3 is a nested grant. Other native statement shapes terminate.
+% =../2, atom/1 and ground structural inequality are standard Logos relations.
+% @id underlying-grant
+underlying(authorized(J,G,U),S,F,T) :- underlying(G,U,F,T).
+% @id underlying-atom
+underlying(F,S,F,S) :- atom(F).
+% @id underlying-other
+underlying(F,S,F,S) :- F =.. [P|Args], P \== authorized.
+% @id underlying-zero
+underlying(authorized(),S,authorized(),S).
+% @id underlying-one
+underlying(authorized(A),S,authorized(A),S).
+% @id underlying-two
+underlying(authorized(A,B),S,authorized(A,B),S).
+% @id underlying-many
+underlying(F,S,F,S) :- F =.. [authorized,A,B,C,D|Rest].

@@ -1,0 +1,5 @@
+% Construction template for rule 5, not a universally executable law clause.
+% For each actual input H :- Body by A at S, substitute A, S and H, and prepend
+% Body to this template's body. A fact is the same construction with Body empty.
+% @id assertion-template
+counts(A,S,H) :- authorized(A,H,S).
