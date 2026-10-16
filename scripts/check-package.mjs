@@ -26,10 +26,15 @@ npm(["ci", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit"],
 npm(["install", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit", join(directory, pack.filename)], directory);
 writeFileSync(join(directory, "check.mjs"), `
 import { strict as assert } from 'node:assert';
-import { atom, createSpacesVerifier, lawDigest } from '@bitspark/thesmos';
+import { atom, createSpacesVerifier, lawDigest, path, fact } from '@bitspark/thesmos';
+import { prove } from '@bitspark/thesmos/client';
+import { authenticateArchon } from '@bitspark/thesmos/archon';
 assert.equal(lawDigest.bytes().length, 32);
-assert.equal(typeof createSpacesVerifier({root: atom('test'), authenticate: () => false}).verify, 'function');
-console.log('Packed verifier and its declarative law load in an independent consumer.');
+const root = atom('synthetic-test-root');
+const query = {actor: root, space: path('child'), statement: fact('operation')};
+const proof = await prove({root, query, bundles: []});
+assert.equal(createSpacesVerifier({root, authenticate: authenticateArchon}).verify({query, proof}).permitted, true);
+console.log('Packed client constructs a proof; packed verifier and law accept it in an independent consumer.');
 `);
 process.stdout.write(execFileSync(process.execPath, [join(directory, "check.mjs")], { encoding: "utf8", cwd: directory }));
 console.log(`Package inspected: ${pack.filename} (${pack.files.length} files). Temporary consumer: ${directory}`);
