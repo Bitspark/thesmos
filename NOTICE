@@ -1,0 +1,7 @@
+thesmos
+Copyright 2026 Bitspark and the thesmos contributors
+
+The initial law and TypeScript verifier were extracted from the Bitspark
+Spaces experiment. The frozen revision 3 law is preserved without semantic
+change. This repository has independent history; the prior thesmos
+implementation remains in the separate private thesmos-legacy repository.

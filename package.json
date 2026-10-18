@@ -1,0 +1,44 @@
+{
+  "name": "@bitspark/thesmos",
+  "version": "1.0.0-preview.1",
+  "description": "The Spaces authority law, with local Logos proof verification and an optional proof client.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "repository": { "type": "git", "url": "git+https://github.com/Bitspark/thesmos.git" },
+  "exports": {
+    ".": { "types": "./dist/core/ts/src/index.d.ts", "default": "./dist/core/ts/src/index.js" },
+    "./client": { "types": "./dist/core/ts/src/client.d.ts", "default": "./dist/core/ts/src/client.js" },
+    "./archon": { "types": "./dist/core/ts/src/archon.d.ts", "default": "./dist/core/ts/src/archon.js" },
+    "./law/*": "./law/*"
+  },
+  "files": ["dist/core/ts/src", "law", "README.md", "LICENSE", "NOTICE"],
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/", "provenance": true },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/core/ts/test/*.test.js",
+    "law:check": "node scripts/compile-law.ts --check && node scripts/check-frozen.mjs",
+    "check": "npm run law:check && npm test && npm run example && node scripts/check-package.mjs && node scripts/check-links.mjs && git diff --check",
+    "example": "node dist/examples/document-service.js && node dist/examples/device-service.js",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@bitspark/logos-contract": "0.23.0",
+    "@bitspark/ontos-codec": "0.13.0",
+    "@bitspark/ontos-data": "0.13.0"
+  },
+  "peerDependencies": {
+    "@bitspark/archon": "0.15.0",
+    "@bitspark/logos-kernel": "0.23.0"
+  },
+  "peerDependenciesMeta": {
+    "@bitspark/archon": { "optional": true },
+    "@bitspark/logos-kernel": { "optional": true }
+  },
+  "devDependencies": {
+    "@bitspark/archon": "0.15.0",
+    "@bitspark/logos-kernel": "0.23.0",
+    "@types/node": "24.0.0",
+    "typescript": "5.9.3"
+  }
+}

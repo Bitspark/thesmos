@@ -1,0 +1,14 @@
+{
+  "source": "541400eeda78940a7ee73ee80ef2e962840c4537",
+  "coreRevision": 3,
+  "sha256": {
+    "law/common-law.logos": "3150914ed9c2bfe5e17233e865e42b5c09edf2bce0e4e7e222dc1810a2219afb",
+    "law/common-law.ontos": "6731e30c07be2a0b97c62cec53c9e9c73a1ca3d5885eb0a1472136a82cb54e14",
+    "law/assertion-template.logos": "02604e7bc51821fa7190dfb2edee06f8665932fde451774d25ce33280d251d59",
+    "law/assertion-template.ontos": "46679748e2d031e938d5bd912f5bcd67074aca0e8fbb722684a0f9b07c891aa3",
+    "law/layers/space-asserter-template.logos": "75c0a67e0e017da67fd3434b3382f28fa7cf8737a3da551207108a5190794a75",
+    "law/layers/space-asserter-template.ontos": "1c9bc679e9da3fefc8c68027b0c1be0dad74a1cf418b73d4060566913847b0fb",
+    "law/protocol.json": "baef37f9b1382a5536f8824d31a8666f89f42d74e41aa1f4451313ef6881b133",
+    "law/conformance.ontos": "77df3d62ac420f2be48f42069fa6a6f88883d488a777de3bd956802a81a3c8d8"
+  }
+}

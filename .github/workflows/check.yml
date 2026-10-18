@@ -1,0 +1,36 @@
+name: check
+on:
+  push:
+    branches: [main, 'core/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/check-frozen.mjs && node scripts/check-links.mjs && git diff --check
+  sdk:
+    # Private Logos packages are available only to maintained repository code.
+    # External PRs receive the public source checks, pending dependency publication.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@bitspark'
+      - run: npm ci --ignore-scripts --allow-remote=all
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGE_READ_TOKEN }}
+      - run: npm run check
