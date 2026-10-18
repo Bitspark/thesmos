@@ -34,3 +34,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGE_READ_TOKEN }}
       - run: npm run check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thesmos-package
+          path: .build-artifacts/*.tgz
+          if-no-files-found: error
