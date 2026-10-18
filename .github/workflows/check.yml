@@ -38,4 +38,5 @@ jobs:
         with:
           name: thesmos-package
           path: .build-artifacts/*.tgz
+          include-hidden-files: true
           if-no-files-found: error

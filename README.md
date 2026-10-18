@@ -15,6 +15,12 @@ available:** the required `@bitspark/logos-contract@0.23.0` and optional client
 dependency `@bitspark/logos-kernel@0.23.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
+The [v1.0.0-preview.1 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.1)
+provides the exact package archive exercised by CI, with SHA-256 checksums.
+Consumers with the required Logos access can pin that archive; it bundles no
+private dependency code. The `/client` and `/archon` entries still require their
+optional peers at the versions below.
+
 With existing GitHub Packages read access, install the committed lockfile and
 run the complete gate:
 
