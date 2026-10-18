@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,4 +37,7 @@ assert.equal(createSpacesVerifier({root, authenticate: authenticateArchon}).veri
 console.log('Packed client constructs a proof; packed verifier and law accept it in an independent consumer.');
 `);
 process.stdout.write(execFileSync(process.execPath, [join(directory, "check.mjs")], { encoding: "utf8", cwd: directory }));
+// Retain the exact archive that passed the independent consumer check.
+mkdirSync(".build-artifacts", { recursive: true });
+copyFileSync(join(directory, pack.filename), join(".build-artifacts", pack.filename));
 console.log(`Package inspected: ${pack.filename} (${pack.files.length} files). Temporary consumer: ${directory}`);
