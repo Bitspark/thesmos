@@ -86,7 +86,8 @@ test("encoded program and individual clause captures preserve exact bytes under 
     const clauses = prepared.nativeProgram().entries();
     for (const [id, original] of clauses) {
       const captured = prepared.clause(id)!;
-      assert.deepEqual(encode(clauseValue(captured)), encode(clauseValue(original)));
+      const capturedBytes = encode(clauseValue(captured));
+      assert.deepEqual(capturedBytes, encode(clauseValue(original)));
       const mutate = (term: Term): void => {
         if (term.kind === "atom") term.bytes().fill(0);
         if (term.kind === "tuple") for (const child of term.children()) mutate(child);
@@ -96,6 +97,7 @@ test("encoded program and individual clause captures preserve exact bytes under 
         for (const premise of clause.body) for (const term of premise.lit.args) mutate(term);
       }
       prepared.canonicalProgramBytes().fill(0);
+      assert.deepEqual(encode(clauseValue(prepared.clause(id)!)), capturedBytes);
       assert.deepEqual(prepared.canonicalProgramBytes(), canonical);
       assert.deepEqual(programBytes(prepared.nativeProgram()), canonical);
       assert.equal(prepared.identity, identity);
