@@ -113,6 +113,7 @@ receiver can acquire applicable bundles without adding policy to the law.
 | [core/ts/test/](core/ts/test/sdk.test.ts) | Core, asserter, mutation and client tests |
 | [docs/model.md](docs/model.md) | Model, trusted facts and implementation boundaries |
 | [docs/foundations.md](docs/foundations.md) | How the public Constellation contracts are used |
+| [docs/runtime.md](docs/runtime.md) | Decision record for the shared runtime: placement, result contract, admitted profile |
 
 There is no store, server, global lease, expiry default, role registry, separate
 publication permission or execution engine in the SDK. A timestamp is signed
