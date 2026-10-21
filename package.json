@@ -24,13 +24,13 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@bitspark/logos-contract": "0.23.0",
+    "@bitspark/logos-contract": "0.24.0",
     "@bitspark/ontos-codec": "0.13.0",
     "@bitspark/ontos-data": "0.13.0"
   },
   "peerDependencies": {
     "@bitspark/archon": "0.15.0",
-    "@bitspark/logos-kernel": "0.23.0"
+    "@bitspark/logos-kernel": "0.24.0"
   },
   "peerDependenciesMeta": {
     "@bitspark/archon": { "optional": true },
@@ -38,7 +38,7 @@
   },
   "devDependencies": {
     "@bitspark/archon": "0.15.0",
-    "@bitspark/logos-kernel": "0.23.0",
+    "@bitspark/logos-kernel": "0.24.0",
     "@types/node": "24.0.0",
     "typescript": "5.9.3"
   }

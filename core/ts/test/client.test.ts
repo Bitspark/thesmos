@@ -105,6 +105,13 @@ test("valid signatures cannot bootstrap a self-appointed supplier", async () => 
   await assert.rejects(prove({ root, query, bundles }), failsAs("exhausted"));
 });
 
+test("the search memory ceiling reaches Logos: one page cannot hold the search", async () => {
+  const query = { actor: bob, space, statement };
+  await assert.rejects(prove({ root, query, bundles: documentBundles(), memoryLimitPages: 1 }), failsAs("not_completed"));
+  const proof = await prove({ root, query, bundles: documentBundles(), memoryLimitPages: 16384 });
+  assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon }).verify({ query, proof }).permitted, true);
+});
+
 test("a search stopped before completion is not reported as exhausted", async () => {
   const query = { actor: bob, space, statement };
   const limits = { ...RunLimits.default(), searchNodes: 1 };
