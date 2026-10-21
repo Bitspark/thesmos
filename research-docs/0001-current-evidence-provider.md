@@ -2,9 +2,10 @@
 
 **ID:** 0001
 **Date:** 21 October 2026
-**Status:** submitted
+**Status:** delivering
 **Run-ID:** run_8fc85688-7f02-4d07-985c-5c270dc83485
 **Reviewed:** https://github.com/Bitspark/thesmos/issues/7#issuecomment-6307905226
+**Graded:** https://github.com/Bitspark/thesmos/issues/7#issuecomment-6308414312
 **Owner:** Spaces/thesmos SDK maintainer
 **Issue:** https://github.com/Bitspark/thesmos/issues/7
 **Source:** https://github.com/Bitspark/thesmos/tree/705807de1bc10ca960c39cb728faaf78f08d3c1e
@@ -296,3 +297,56 @@ The fresh public successor has no research-docs corpus. The service's old
 law; its private research/history is not imported. A separate
 `thesmos-core-research` collection is empty at preparation. Current source,
 issues 7/11 and the concrete consumer constraints above form this brief.
+
+## Applied
+
+This heading tracks delivery; the consultation is **delivering**, not applied.
+The preceding brief describes the submitted proposal. The disposition below
+supersedes its unqualified selected-union description: mutable source outputs
+must retain their configured selection responsibility across providers.
+
+Attempt 1 submitted 15,191 bytes with SHA-256
+`b74dc338a9de3f8513238bf68367c9fd80809443ecfedc81f79ae696fc3f109d`.
+Run `run_8fc85688-7f02-4d07-985c-5c270dc83485` completed; service verification
+returned exit 0 and matched the local raw advice, 28,998 bytes with SHA-256
+`543f68b83d38b197f3746b9e0ea0c7f89e044f1e77072f83efe4b612ad339077`.
+The submitted snapshot and raw response are retained unchanged.
+
+Evaluation inspected thesmos `705807de1bc10ca960c39cb728faaf78f08d3c1e`,
+SDK implementation `506ab68a7258a04fe2056e79108a03cfaca33d72` and Accounts
+`2b553f27c5089c0a52b2f74e57ba8575cdfcc9a1`. The SDK change was independently
+reviewed and delivered as main `f8b69abda15a6a3c964c664cdf0063d0c64dcbae` and
+`v1.0.0-preview.2`; its source gates passed 95 tests and all eight frozen-artifact
+checks. The Accounts source review is not its full gate or live qualification.
+
+In the table, **SDK** is the thesmos maintainer; **Accounts** is the receiving
+implementation owner; **Auditor** is the independent platform reviewer.
+
+| # | Recommendation | Verdict | Action | Owner | Link | Validation |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | One small configured read boundary | NEEDS ADAPTATION | Use the existing internal adapter. Add a public type only when a concrete interoperable caller needs it; avoid competing read/supply protocols. | Accounts; SDK | [Provider profile](../docs/evidence-selection.md), [Accounts PR63](https://github.com/Bitspark/bitspark-accounts/pull/63), [issue 7](https://github.com/Bitspark/thesmos/issues/7) | Two concrete source implementations under the same receiving boundary; exact Accounts gate pending. |
+| 2 | Give revisions an explicit protocol meaning | HOLDS | Keep source revision and local fence meaning service-owned; no mandatory model field. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Source-change, retry and local-fence cases; exact gate pending. |
+| 3 | Preserve source-selection responsibility | HOLDS | Reject stale Accounts outputs replayed by another endpoint; preserve independently signed authorized alternatives. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | `independent-provider.test.ts` replay/alternative pair and `document-portal.test.ts` foundation replay; exact gate pending. |
+| 4 | Persist complete payload and authentication | HOLDS | Store immutable signed outputs; compare complete bundle identity at receipt. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Stable repeated selection, restart, mutation and withdrawal cases in `space-records.test.ts`; exact gate pending. |
+| 5 | Deselect all affected whole-bundle versions | NEEDS ADAPTATION | One bundle per record avoids mixed-record replacement now; document the obligation before batching. | Accounts; SDK | [Profile](../docs/evidence-selection.md), [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Withdrawal, independently live identical output and fresh reauthoring in `record-proposals.test.ts`; exact gate pending. |
+| 6 | Retain the actual authenticated approval generation | HOLDS | Compare proposal-captured epoch/outbox and exact clause inside the insertion transaction; authenticate HTTP session/CSRF after bounded body acquisition. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Delayed epoch/outbox approval, altered author/body and slow-body cases in `record-proposals.test.ts` and `record-http.test.ts`; exact gate pending. |
+| 7 | Define lifecycle; avoid resurrection and cascading deletion | HOLDS | Explicit source lifecycle controls selection. Reauthoring is a fresh act; remaining authority paths are checked by the law. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Hold, recovery, re-enable, immutable withdrawal, new approval and surviving-route pairs; exact gate pending. |
+| 8 | Separate source-local, cross-source and effect consistency | HOLDS | Document coherent local reads, required observations and local effect fences; claim no global atomic snapshot. | Accounts; Auditor | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63), [platform issue 237](https://github.com/Bitspark/platform/issues/237) | Concurrent source change, final-await fence and required-provider outage cases; exact gate pending. |
+| 9 | Coordinate when joint or effect-time remote validity is required | DEFERRED | Trigger: a concrete operation requires a stronger guarantee than this observation profile. Its receiver owns the protocol. | Receiving service | [Profile](../docs/evidence-selection.md) | Current documentation explicitly states the weaker guarantee. |
+| 10 | Exact issuer/subject native identity, separate authentication | HOLDS | Deliver optional `/identity`; retain exact Unicode with no implicit normalization or key aliases. | SDK | [PR14](https://github.com/Bitspark/thesmos/pull/14) | [Run39545194402](https://github.com/Bitspark/thesmos/actions/runs/39545194402): native roundtrips, malformed shapes and identity separation pass. |
+| 11 | Preserve identity and provenance continuity through recovery | HOLDS | Record namespace, generation, withdrawal and authenticated history obligations; production backup drills remain outside this development scope. | Accounts; SDK | [Profile](../docs/evidence-selection.md), [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Restart, lineage and stale-context refusal tests; exact gate pending. |
+| 12 | Separate actor eligibility, evidence applicability and authority | HOLDS | Keep those checks distinct; reconstruct the actual receiver query. | Accounts; SDK | [PR14](https://github.com/Bitspark/thesmos/pull/14), [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | SDK changed-query cases pass; paired receiving-boundary cases remain pending. |
+| 13 | Preserve complete native chains without personal keys | HOLDS | Exercise non-root suppliers, both onward grants, variables, conditions and alternatives without custom grounding. | SDK; Accounts; Auditor | [PR14](https://github.com/Bitspark/thesmos/pull/14), [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | SDK 95/95 pass, including two titles through the same variable rules. Accounts actual conditional-title chain and installed journey remain pending. |
+| 14 | Bound acquisition separately and preserve failure meaning | HOLDS | Bound reads/decode and refuse incomplete data; retain typed native search/capacity failure. | Accounts; SDK | [PR14](https://github.com/Bitspark/thesmos/pull/14), [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | SDK capacity witness passes; receiving outage, oversize and changed-data cases pending. |
+| 15 | Pin pagination and coverage when added | DEFERRED | Trigger: first paged interoperable adapter. The current unpaged adapter must refuse, not truncate, oversized selections. | SDK; Accounts | [Issue 7](https://github.com/Bitspark/thesmos/issues/7), [issue 11](https://github.com/Bitspark/thesmos/issues/11) | Current bound/refusal checks; no completeness or global non-authority claim. |
+| 16 | Separate current selection from cached immutable objects | NEEDS ADAPTATION | Existing selection over stored bundles already provides this composition; add no manifest protocol. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Stable-byte and changed-membership cases; exact gate pending. |
+| 17 | Select only proof-relevant positive evidence | DEFERRED | Trigger: full bounded selection exceeds an actual receiver budget. Extend the same adapter if required. | SDK; receiving service | [Issue 7](https://github.com/Bitspark/thesmos/issues/7) | No optimization is claimed for current full selections. |
+| 18 | Permit receiver-owned proof construction | HOLDS | Prove using receiver-selected bundles and verify the same actual query before effect. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Actual actor/title/effect and final current-selection tests; exact gate pending. |
+| 19 | Prune unused bundles | DEFERRED | Keep the existing scoped pruning work separate. Until delivered, rebuild proofs using surviving selections. | SDK | [Issue 9](https://github.com/Bitspark/thesmos/issues/9) | New proof through an alternative succeeds; old unused deselected evidence is not silently current. |
+
+No mandatory author signature, publication privilege, global lease, expiry
+default, role registry, new law axiom or cascading revocation is accepted.
+Accounts remains responsible for the service implementation and deployment.
+The Auditor independently verifies its exact delivered state. This research
+remains delivering until the accepted receiving cases have passing evidence;
+library qualification alone does not complete those rows.
