@@ -157,7 +157,9 @@ bundle byte/clause costs, with ordinary evidence generation and verification exp
 The adapter measures and independently checks the actual final envelope
 before returning the permitted result and its `proof`; a source budget alone is insufficient.
 
-The native portable budget includes FIRM account bytes and the account-node bound. The remaining
+The native portable budget includes FIRM account bytes, the account-node bound and the frozen
+proof-depth and term-depth bounds, so an oversized candidate cannot suppress a fitting alternative.
+The remaining
 Spaces envelope reserve is calculated from the frozen Ontos codec: the outer tuple header, encoded
 format/law/layer values, the bundle tuple header at the maximum group count, and the account atom
 header at the maximum account byte length. Bundle children are charged separately in full.

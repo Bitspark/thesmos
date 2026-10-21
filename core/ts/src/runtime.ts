@@ -158,6 +158,8 @@ export class SpacesRuntime {
       maxBytes: budget?.maxBytes ?? protocol.limits.maxProofBytes,
       maxClauses: budget?.maxClauses ?? protocol.limits.maxProofSteps,
       maxAccountNodes: budget?.maxSteps ?? protocol.limits.maxProofSteps,
+      maxAccountDepth: protocol.limits.maxProofDepth,
+      maxTermDepth: protocol.limits.maxTermDepth,
       reservedEnvelopeBytes: portableEnvelopeReserve(budget?.maxBytes ?? protocol.limits.maxProofBytes, protocol.limits.maxProofSteps) };
     const binding = deriveCheckProfileSpec(this.profile);
     const digest = createHash("sha256").update(JSON.stringify({ programs: programs.map(p => p.identity), cost,
