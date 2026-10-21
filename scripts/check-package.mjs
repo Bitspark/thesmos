@@ -12,6 +12,7 @@ const directory = mkdtempSync(join(tmpdir(), "thesmos-pack-"));
 const [pack] = Object.values(JSON.parse(npm(["pack", "--ignore-scripts", "--json", "--pack-destination", directory], process.cwd())));
 assert(pack.files.some(file => file.path === "law/common-law.ontos"));
 assert(pack.files.some(file => file.path === "dist/core/ts/src/client.d.ts"));
+assert(pack.files.some(file => file.path === "dist/core/ts/src/identity.d.ts"));
 assert(pack.files.every(file => !/node_modules|test\/|examples\/|\.git\//.test(file.path)));
 // The lockfile's dependency URLs preserve the selected private Logos artifacts.
 // Use an independent package installation, not workspace imports.
@@ -26,10 +27,14 @@ npm(["ci", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit"],
 npm(["install", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit", join(directory, pack.filename)], directory);
 writeFileSync(join(directory, "check.mjs"), `
 import { strict as assert } from 'node:assert';
-import { atom, createSpacesVerifier, lawDigest, path, fact } from '@bitspark/thesmos';
+import { atom, attributedClause, createSpacesVerifier, inspectAttributedClause, lawDigest, path, fact } from '@bitspark/thesmos';
 import { prove } from '@bitspark/thesmos/client';
 import { authenticateArchon } from '@bitspark/thesmos/archon';
+import { issuerSubjectPrincipal, decodeIssuerSubjectPrincipal } from '@bitspark/thesmos/identity';
 assert.equal(lawDigest.bytes().length, 32);
+const account = issuerSubjectPrincipal('https://accounts.example', 'alice');
+assert.deepEqual(decodeIssuerSubjectPrincipal(account), {issuer: 'https://accounts.example', subject: 'alice'});
+assert.equal(inspectAttributedClause(attributedClause(account, path(), fact('example'))).author.equals(account), true);
 const root = atom('synthetic-test-root');
 const query = {actor: root, space: path('child'), statement: fact('operation')};
 const proof = await prove({root, query, bundles: []});

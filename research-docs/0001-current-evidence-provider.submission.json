@@ -12,7 +12,11 @@
       "codeRevision": "705807de1bc10ca960c39cb728faaf78f08d3c1e",
       "cliBuild": "nightfall 0.1.0 e2640b38009d bundle ef085ca51a5d",
       "recordedAt": "2026-10-21T04:17:04.5075356Z",
-      "state": "prepared"
+      "state": "submitted",
+      "documentId": "doc_7daa5de2-a4b4-4ba2-8296-298a7c9dab3d",
+      "serverSha256": "b74dc338a9de3f8513238bf68367c9fd80809443ecfedc81f79ae696fc3f109d",
+      "runId": "run_8fc85688-7f02-4d07-985c-5c270dc83485",
+      "submittedAt": "2026-10-21T04:22:51.1568832Z"
     }
   ]
 }
