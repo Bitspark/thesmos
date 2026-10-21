@@ -157,6 +157,15 @@ bundle byte/clause costs, with ordinary evidence generation and verification exp
 The adapter measures and independently checks the actual final envelope
 before returning the permitted result and its `proof`; a source budget alone is insufficient.
 
+The native portable budget includes FIRM account bytes and the account-node bound. The remaining
+Spaces envelope reserve is calculated from the frozen Ontos codec: the outer tuple header, encoded
+format/law/layer values, the bundle tuple header at the maximum group count, and the account atom
+header at the maximum account byte length. Bundle children are charged separately in full.
+Original `supplied/<64 hex digits>/<index>` rule IDs become shorter `bundle/<position>/<index>`
+IDs; export asserts that this never enlarges an atom. All other account nodes remain unchanged,
+so the measured native account plus that reserve is a conservative byte bound. Boundary tests
+compare the reserve with actual envelope bytes across unsigned-LEB128 length/arity changes.
+
 `replace(bundles)` prepares the new base before publishing it atomically. Already opened requests
 and retained witnesses keep their original interpretation. This first adapter rebuilds replacement
 views; it does not claim incremental retraction maintenance. `baseIdentity` identifies exact source

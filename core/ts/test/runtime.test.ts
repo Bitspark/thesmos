@@ -1,11 +1,13 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { getPublicKey } from "@bitspark/archon";
-import { Atom, Clause, Goal, Term, VarId } from "@bitspark/logos-contract";
+import { Atom, Clause, Goal, Term, Tuple, VarId, clauseFromValue, clauseValue, programBytes } from "@bitspark/logos-contract";
+import { decode, encode } from "@bitspark/ontos-codec";
 import { encodeInt } from "@bitspark/ontos-data";
 import { atom, authorization, attributedClause, createSpacesVerifier, decodeProof, fact, path } from "../src/index.js";
 import { authenticateArchon, signSpaceFacts } from "../src/archon.js";
-import { createSpacesRuntime, instantiateSpacesObservations, prepareSpacesOverlay, prepareSpacesProgram, PreparationRefused } from "../src/runtime.js";
+import { createSpacesRuntime, instantiateSpacesObservations, portableEnvelopeReserve, prepareSpacesOverlay, prepareSpacesProgram, PreparationRefused } from "../src/runtime.js";
+import { lawDigest, layerDigest, protocol } from "../src/data.js";
 
 const seed = new Uint8Array(32).fill(71), observerSeed = new Uint8Array(32).fill(72);
 const root = new Atom(getPublicKey(seed)), observer = new Atom(getPublicKey(observerSeed));
@@ -41,7 +43,9 @@ test("preparation authenticates copies and retains distinct whole source identit
   const one = observation("one"), two = sign([attributedClause(observer, path("synthetic-requests", "one"), atom("observed"))],
     observerSeed, path("synthetic-requests", "one"), 1n);
   const prepared = prepareSpacesOverlay({ bundles: [one, two], budget, authenticate: request => {
-    const accepted = authenticateArchon(request); request.payload.fill(0); return accepted;
+    const accepted = authenticateArchon(request); request.payload.fill(0);
+    if (request.supplier instanceof Atom) request.supplier.bytes().fill(0);
+    return accepted;
   } });
   assert.equal(prepared.clauseCount, 2);
   assert.equal(new Set(prepared.sourceCosts().map(source => source.group)).size, 2);
@@ -54,6 +58,25 @@ test("preparation authenticates copies and retains distinct whole source identit
   }
   assert.equal(instantiateSpacesObservations(prepared, templates).length, 2);
   assert.throws(() => instantiateSpacesObservations(prepared, []), PreparationRefused);
+  const captured = programBytes(prepared.nativeProgram());
+  const [id, outward] = prepared.nativeProgram().entries()[0]!;
+  const author = outward.head.args[0]!;
+  assert.equal(author.kind, "atom");
+  if (author.kind === "atom") author.bytes().fill(0);
+  const outwardClause = prepared.clause(id)!;
+  const nextAuthor = outwardClause.head.args[0]!;
+  if (nextAuthor.kind === "atom") nextAuthor.bytes().fill(0);
+  assert.deepEqual(programBytes(prepared.nativeProgram()), captured);
+});
+
+test("the calculated envelope reserve bounds actual codec bytes at varint boundaries", () => {
+  const bundle = new Tuple([new Atom(new Uint8Array([1, 2, 3])), atom("authentication")]);
+  const sourceBytes = encode(bundle).byteLength;
+  for (const groups of [0, 127, 128, 2048]) for (const bytes of [0, 127, 128, 16383, 16384, 1048576]) {
+    const envelope = encode(new Tuple([atom(protocol.format), lawDigest, layerDigest,
+      new Tuple(Array(groups).fill(bundle)), new Atom(new Uint8Array(bytes))]));
+    assert(envelope.byteLength <= sourceBytes * groups + bytes + portableEnvelopeReserve(bytes, groups));
+  }
 });
 
 test("acquisition is independent of the portable clause limit and remains bounded", () => {
@@ -106,6 +129,32 @@ test("required portable selection preserves a small eligible alternative", async
       const carried = decodeProof(result.proof).bundles;
       assert.equal(carried.length, 1);
       assert.deepEqual(carried[0]!.payload, small.payload);
+    } finally { result.witness.close(); }
+    const limited = await runtime.decide({ query: request, observations: [], portable: "required", carryingBudget: { maxClauses: 1, maxSteps: 1 } });
+    assert.equal(limited.kind, "unsupported");
+  } finally { runtime.close(); }
+});
+
+test("root, query and declared fragment byte mutation cannot rewrite a prepared interpretation", async () => {
+  const mutableRoot = new Atom(getPublicKey(seed));
+  const mutableTemplates = templates.map(template => ({ ...template, clause: clauseFromValue(decode(encode(clauseValue(template.clause))))! }));
+  const runtime = await createSpacesRuntime({ root: mutableRoot, bundles: base(), authenticate: authenticateArchon,
+    preparationBudget: budget, observationTemplates: mutableTemplates });
+  try {
+    mutableRoot.bytes().fill(0);
+    const statement = mutableTemplates[0]!.clause.head.args[2]!;
+    if (statement.kind === "atom") statement.bytes().fill(0);
+    const mutableQuery = query("captured");
+    const pending = runtime.decide({ query: mutableQuery, observations: [observation("captured")] });
+    ((mutableQuery.statement as Tuple).at(1) as Atom).bytes().fill(0);
+    const result = await pending;
+    assert.equal(result.kind, "permitted", result.kind === "unsupported" ? result.detail : undefined);
+    if (result.kind !== "permitted") return;
+    try {
+      const exported = await result.witness.export();
+      assert.equal(exported.kind, "exported");
+      if (exported.kind === "exported") assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon })
+        .verify({ query: query("captured"), proof: exported.proof }).permitted, true);
     } finally { result.witness.close(); }
   } finally { runtime.close(); }
 });

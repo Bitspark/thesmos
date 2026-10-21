@@ -1,5 +1,5 @@
 import {
-  AlwaysAdmit, ClauseId, Evidence, NodeMeta, PredicateSet, TermTheory, type CheckProfile, type Value,
+  AlwaysAdmit, ClauseId, Evidence, NodeMeta, PredicateSet, TermTheory, clauseFromValue, clauseValue, type CheckProfile, type Clause, type Value,
 } from "@bitspark/logos-contract";
 import {
   Bindings, ComponentBinding, Digest, DoorReplyError, Multiplicity, PreparedSessionError, Program, Session, WasmPreparedFactory, deriveCheckProfileSpec,
@@ -8,20 +8,20 @@ import {
   type PreparedViewLease, type RetainedPreparedWitness,
 } from "@bitspark/logos-kernel";
 import { createHash } from "node:crypto";
-import { encode } from "@bitspark/ontos-codec";
+import { decode, encode } from "@bitspark/ontos-codec";
 import { authorization, fact, inputLiteral } from "./encoding.js";
 import { checkLimits } from "./proof.js";
 import { protocol } from "./data.js";
 import { instantiateSpacesObservations } from "./runtime-fragments.js";
 import {
-  exportSpacesProof, prepareSpacesOverlay, prepareSpacesProgram,
+  exportSpacesProof, portableEnvelopeReserve, prepareSpacesOverlay, prepareSpacesProgram,
   type CarryingBudget, type PreparationBudget, type SpacesExport, type SpacesProgram,
 } from "./runtime-source.js";
 export { instantiateSpacesObservations } from "./runtime-fragments.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
 
 export {
-  exportSpacesProof, PreparationRefused, prepareSpacesOverlay, prepareSpacesProgram, SpacesProgram,
+  exportSpacesProof, portableEnvelopeReserve, PreparationRefused, prepareSpacesOverlay, prepareSpacesProgram, SpacesProgram,
   type CarryingBudget, type PreparationBudget, type SpacesExport,
 } from "./runtime-source.js";
 
@@ -31,6 +31,12 @@ export type SpacesRuntimeDecision =
   | { readonly kind: "unsupported"; readonly detail: string; readonly outcome?: KernelOutcome; readonly refusal?: DoorReplyError | PreparedSessionError };
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+const copyValue = (value: Value): Value => decode(encode(value));
+const copyClause = (clause: Clause): Clause => {
+  const copy = clauseFromValue(decode(encode(clauseValue(clause))));
+  if (!copy) throw new TypeError("Invalid observation template clause");
+  return copy;
+};
 
 /** The witness retains exact source bytes independently of requests and publications. */
 export class SpacesWitness {
@@ -94,6 +100,10 @@ export class SpacesRuntime {
   ) { this.#base = base; this.#lease = lease; }
 
   static async open(config: SpacesRuntimeConfig): Promise<SpacesRuntime> {
+    config = { ...config, root: copyValue(config.root),
+      preparationBudget: Object.freeze({ ...config.preparationBudget }),
+      observationTemplates: (config.observationTemplates ?? []).map(template => ({ ...template,
+        clause: copyClause(template.clause), parameters: [...template.parameters] })) };
     const base = prepareSpacesProgram({ bundles: config.bundles, authenticate: config.authenticate, budget: config.preparationBudget });
     const anchor = inputLiteral(fact("root", config.root));
     const profile: CheckProfile<undefined> = {
@@ -130,6 +140,11 @@ export class SpacesRuntime {
   }
 
   #portableSupport(programs: readonly SpacesProgram[], budget?: CarryingBudget): CatalogSupportPolicy {
+    for (const [bound, maximum] of [[budget?.maxBytes, protocol.limits.maxProofBytes],
+      [budget?.maxClauses, protocol.limits.maxProofSteps], [budget?.maxSteps, protocol.limits.maxProofSteps]]) {
+      if (bound !== undefined && (!Number.isSafeInteger(bound) || bound < 0 || bound > maximum!))
+        throw new TypeError("A carrying budget may tighten, but cannot enlarge, the portable limits");
+    }
     const groups = new Map<string, { id: string; encodedBytes: number; clauses: number }>();
     const rules = new Map<string, readonly string[]>();
     for (const program of programs) {
@@ -141,7 +156,9 @@ export class SpacesRuntime {
     }
     const cost = { maxGroups: protocol.limits.maxProofSteps,
       maxBytes: budget?.maxBytes ?? protocol.limits.maxProofBytes,
-      maxClauses: budget?.maxClauses ?? protocol.limits.maxProofSteps, reservedEnvelopeBytes: 128 };
+      maxClauses: budget?.maxClauses ?? protocol.limits.maxProofSteps,
+      maxAccountNodes: budget?.maxSteps ?? protocol.limits.maxProofSteps,
+      reservedEnvelopeBytes: portableEnvelopeReserve(budget?.maxBytes ?? protocol.limits.maxProofBytes, protocol.limits.maxProofSteps) };
     const binding = deriveCheckProfileSpec(this.profile);
     const digest = createHash("sha256").update(JSON.stringify({ programs: programs.map(p => p.identity), cost,
       root: hex(encode(this.config.root)), profile: binding.digest().toHex() })).digest();
@@ -156,7 +173,8 @@ export class SpacesRuntime {
   async request(request: SpacesRequestOptions): Promise<SpacesPreparedRequest> {
     if (this.#closed) throw new Error("Runtime is closed");
     const base = this.#base, lease = this.#lease;
-    const query = Object.freeze({ ...request.query }), carryingBudget = request.carryingBudget && Object.freeze({ ...request.carryingBudget });
+    const query = Object.freeze({ actor: copyValue(request.query.actor), space: copyValue(request.query.space), statement: copyValue(request.query.statement) });
+    const carryingBudget = request.carryingBudget && Object.freeze({ ...request.carryingBudget });
     const required = request.portable === "required", signal = request.signal;
     const overlay = prepareSpacesOverlay({ bundles: request.observations, authenticate: this.config.authenticate, budget: this.config.preparationBudget });
     const execution: PreparedQuery = await lease.request({ goal: inputLiteral(authorization(query.actor, query.statement, query.space)).toGoal(),

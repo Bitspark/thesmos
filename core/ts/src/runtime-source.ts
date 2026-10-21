@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import {
-  Atom, ClauseId, Derivation, MapProgram, RuleNode, Tuple, programBytes,
+  Atom, ClauseId, Derivation, MapProgram, RuleNode, Tuple, clauseFromValue, clauseValue, programBytes, programFromValue,
   type Clause, type Value,
 } from "@bitspark/logos-contract";
-import { decode, encode } from "@bitspark/ontos-codec";
+import { decode, encode, encodeUvarint } from "@bitspark/ontos-codec";
 import { decodeSpaceFacts } from "./bundles.js";
 import { loadLaw, lawDigest, layerDigest, protocol } from "./data.js";
-import { suppliedClause } from "./encoding.js";
+import { atom, suppliedClause } from "./encoding.js";
 import { createSpacesVerifier } from "./index.js";
 import { encodeProof } from "./proof.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
@@ -47,6 +47,7 @@ const validBound = (n: number) => Number.isSafeInteger(n) && n >= 0;
  */
 export class SpacesProgram {
   readonly #program: MapProgram;
+  readonly #programBytes: Uint8Array;
   readonly #sources: ReadonlyMap<string, ClauseSource>;
   readonly #bundles: readonly Source[];
   readonly identity: string;
@@ -55,9 +56,10 @@ export class SpacesProgram {
 
   private constructor(program: MapProgram, sources: Map<string, ClauseSource>, bundles: Source[], bytes: number) {
     this.#program = program;
+    this.#programBytes = programBytes(program);
     this.#sources = sources;
     this.#bundles = bundles;
-    this.identity = sha256(programBytes(program));
+    this.identity = sha256(this.#programBytes);
     this.clauseCount = sources.size;
     this.payloadBytes = bytes;
   }
@@ -82,7 +84,7 @@ export class SpacesProgram {
       if (!Number.isSafeInteger(bytes) || bytes > budget.maxPayloadBytes) throw new PreparationRefused("budget", "Selected payload limit exceeded");
       const bundle = copyBundle(supplied);
       const output = decodeSpaceFacts(bundle.payload);
-      if (request.authenticate({ ...copyBundle(bundle), supplier: output.supplier }) !== true) {
+      if (request.authenticate({ ...copyBundle(bundle), supplier: decode(encode(output.supplier)) }) !== true) {
         throw new PreparationRefused("authentication", "Selected space-facts output did not authenticate");
       }
       count += output.clauses.length;
@@ -102,11 +104,9 @@ export class SpacesProgram {
     return new SpacesProgram(program, sources, [...unique.values()], bytes);
   }
 
-  /** A fresh native table; later caller mutations cannot change retained source material. */
+  /** Decode a defensive view: even mutable Term atom bytes cannot alter the capture. */
   nativeProgram(): MapProgram {
-    const program = new MapProgram();
-    for (const [id, clause] of this.#program.entries()) program.insert(ClauseId.of(id), clause);
-    return program;
+    return programFromValue(decode(this.#programBytes));
   }
 
   selectedBundles(): readonly SpaceFactsBundle[] { return this.#bundles.map(source => copyBundle(source.bundle)); }
@@ -121,7 +121,10 @@ export class SpacesProgram {
     return { key: source.key, index: found.index, clauses: source.clauses,
       get bundle() { return copyBundle(source.bundle); } };
   }
-  clause(id: string): Clause | undefined { return this.#program.clause(ClauseId.of(id)); }
+  clause(id: string): Clause | undefined {
+    const clause = this.#program.clause(ClauseId.of(id));
+    return clause && clauseFromValue(decode(encode(clauseValue(clause))));
+  }
 }
 
 export function prepareSpacesProgram(request: {
@@ -140,6 +143,19 @@ export function prepareSpacesOverlay(request: {
 export type SpacesExport =
   | { readonly kind: "exported"; readonly proof: Uint8Array; readonly bundles: number; readonly clauses: number; readonly steps: number }
   | { readonly kind: "unavailable"; readonly reason: "unselected-source" | "carrying-limit" | "invalid-witness"; readonly detail: string };
+
+/**
+ * Frozen Ontos v1 uses tag + unsigned-LEB128 length/arity, then child bytes.
+ * Bundle children are charged whole separately; FIRM account bytes are charged
+ * by the provider. This is the complete remaining envelope overhead at the
+ * maximum permitted bundle count and account length, both monotone bounds.
+ */
+export function portableEnvelopeReserve(maxAccountBytes: number, maxGroups: number): number {
+  if (![maxAccountBytes, maxGroups].every(validBound)) throw new TypeError("Finite envelope bounds are required");
+  const header = (n: number) => 1 + encodeUvarint(n).byteLength;
+  return header(5) + encode(atom(protocol.format)).byteLength + encode(lawDigest).byteLength +
+    encode(layerDigest).byteLength + header(maxGroups) + header(maxAccountBytes);
+}
 
 /** Reconstruct the envelope from recorded inference only, then independently check it. */
 export function exportSpacesProof(request: {
@@ -177,6 +193,13 @@ export function exportSpacesProof(request: {
   const clauses = ordered.reduce((sum, [, source]) => sum + source.clauses, 0);
   if (clauses > maxClauses) return unavailable("carrying-limit", "Whole carried bundles exceed the clause limit");
   const positions = new Map(ordered.map(([key], index) => [key, index]));
+  // The native budget measures original FIRM account bytes. Replacing our exact
+  // source IDs by portable positions must never enlarge any encoded atom.
+  for (const [id, ref] of refs) {
+    const portable = `bundle/${positions.get(ref.key)}/${ref.index}`;
+    if (new TextEncoder().encode(portable).byteLength > new TextEncoder().encode(id).byteLength)
+      return unavailable("invalid-witness", "Portable source identity would enlarge the measured account");
+  }
   const nodes = request.derivation.nodes.map(node => {
     if (node.kind !== "rule") return node;
     const ref = refs.get(node.clause.asStr());
