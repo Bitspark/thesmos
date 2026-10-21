@@ -153,7 +153,8 @@ that support, maps exact source IDs to complete signed bundles and checks the un
 It performs no search and remains available after the request, base replacement and owner retire.
 An optional export can return `unavailable` while the local permission remains valid. With
 `portable: 'required'`, native selection considers eligible source alternatives and distinct whole
-bundle byte/clause costs. The adapter measures and independently checks the actual final envelope
+bundle byte/clause costs, with ordinary evidence generation and verification explicitly enabled.
+The adapter measures and independently checks the actual final envelope
 before returning the permitted result and its `proof`; a source budget alone is insufficient.
 
 `replace(bundles)` prepares the new base before publishing it atomically. Already opened requests

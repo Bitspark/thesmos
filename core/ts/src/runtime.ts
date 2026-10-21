@@ -162,7 +162,8 @@ export class SpacesRuntime {
     const execution: PreparedQuery = await lease.request({ goal: inputLiteral(authorization(query.actor, query.statement, query.space)).toGoal(),
       fragments: instantiateSpacesObservations(overlay, this.config.observationTemplates ?? []), limits: this.config.limits,
       support: required ? this.#portableSupport([base, overlay], carryingBudget) : { kind: "local" },
-      evidence: { policy: "none", retention: "discard", verify: { kind: "none" } }, witnessCapture: "retain" });
+      evidence: required ? { policy: "generate", retention: "retain", verify: { kind: "every" } }
+        : { policy: "none", retention: "discard", verify: { kind: "none" } }, witnessCapture: "retain" });
     return { admission: execution.admission(), close: () => execution.close(), run: async () => {
       const result = await execution.run(signal), snapshot = hex(result.snapshot.bytes);
       if (result.completion.kind === "incomplete") return { kind: "unsupported", detail: result.completion.reason, outcome: result.outcome };
