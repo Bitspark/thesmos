@@ -12,6 +12,9 @@ records replacement phases if execution reaches them. Records identify the exact
 Logos and Thesmos source pins, build receipt and run, together with process memory,
 peak RSS, CPU use and actual V8 heap limit. A separate supervisor retains the file
 when V8 aborts before an operation can write its closing checkpoint.
+Checkpoint failures cannot throw into product execution or prevent cleanup. They
+set a failing diagnostic process exit and attempt a separate failure sidecar/log;
+the supervisor rejects that measurement even when product execution completes.
 
 No heap setting or runtime budget changes. No source graph escapes, source is
 not pre-evaluated, and the caller's authority decision still uses the ordinary

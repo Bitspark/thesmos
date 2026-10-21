@@ -17,6 +17,19 @@ export function runtimeCheckpoint(id: number, phase: string, edge: "start" | "co
   // Only the explicit remote exploratory process writes these records. Normal
   // package checks on this diagnostic source retain the ordinary runtime path.
   if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return;
+  try { writeCheckpoint(id, phase, edge, detail); }
+  catch {
+    // Observability cannot change a product outcome or prevent its cleanup. A
+    // failed probe invalidates this diagnostic process separately, even if both
+    // evidence channels fail. The supervisor retains the nonzero process exit.
+    process.exitCode = 1;
+    const marker = JSON.stringify({ format: "thesmos/cold-runtime-diagnostic-failure/1", activation: id, phase, edge });
+    try { appendFileSync(join(process.env.RUNNER_TEMP ?? ".", "prepared-spaces", "runtime-diagnostic-failures.ndjson"), marker + "\n"); } catch { /* exit status remains failed */ }
+    try { console.error(marker); } catch { /* exit status remains failed */ }
+  }
+}
+
+function writeCheckpoint(id: number, phase: string, edge: "start" | "complete" | "failed", detail?: string): void {
   if (process.env.GITHUB_ACTIONS !== "true" || !process.env.RUNNER_TEMP ||
       !/^\d+$/.test(process.env.GITHUB_RUN_ID ?? "") || !process.env.GITHUB_EVENT_PATH ||
       JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")).inputs?.mode !== "profile-current" ||
@@ -44,7 +57,7 @@ export function runtimePhase<T>(id: number, phase: string, operation: () => T): 
     runtimeCheckpoint(id, phase, "complete");
     return result;
   } catch (error) {
-    runtimeCheckpoint(id, phase, "failed", error instanceof Error ? error.message : String(error));
+    runtimeCheckpoint(id, phase, "failed", "The runtime operation threw; its original exception is preserved");
     throw error;
   }
 }

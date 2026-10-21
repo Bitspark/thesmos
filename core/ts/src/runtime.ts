@@ -205,7 +205,7 @@ export class SpacesRuntime {
       runtimeCheckpoint(diagnostic, "create", "complete");
       return new SpacesRuntime({ config: captured, owner, factory, profile, base, lease });
     } catch (error) {
-      runtimeCheckpoint(diagnostic, "owner-prepare", "failed", error instanceof Error ? error.message : String(error));
+      runtimeCheckpoint(diagnostic, "owner-prepare", "failed", "Preparation threw; its original exception is preserved");
       owner.close(); throw error;
     }
   }
