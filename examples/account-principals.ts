@@ -35,6 +35,7 @@ export interface AccountEvidenceOptions {
   readonly omit?: "supplier" | "alice" | "observation";
   readonly alternative?: boolean;
   readonly aliceAuthor?: Value;
+  /** False is the separate wide-operation search-capacity witness. */
   readonly operationBound?: boolean;
 }
 
@@ -53,7 +54,7 @@ export function accountBundles(options: AccountEvidenceOptions = {}): readonly S
     signSpaceFacts({ supplier: accounts, space: team, assertedAt: time, clauses: [
       ...(options.omit === "alice" ? [] : operations.map(op => at(grantor, authorization(alice, op, team)))),
       ...operations.map(op => at(options.aliceAuthor ?? alice, authorization(bob, op, team))),
-      ...(options.operationBound ? operations.map(op => at(bob, new Clause(
+      ...(options.operationBound !== false ? operations.map(op => at(bob, new Clause(
         Goal.of("authorized", [Term.var("Person"), Term.fromValue(op), Term.fromValue(team)]),
         conditionalGrant.body,
       ))) : [at(bob, conditionalGrant)]),

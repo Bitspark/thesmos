@@ -62,7 +62,8 @@ The [runnable example](../examples/account-principals.ts) uses the unchanged
 five-rule law for two unrelated operations: changing a document title and a
 device temperature. Synthetic root evidence authorizes a non-root grantor.
 That grantor authorizes the account supplier and Alice; Alice grants Bob;
-Bob's variable rule grants an eligible person an operation that Bob holds.
+For each example operation, Bob's variable rule grants it to an eligible person
+only when Bob holds it; the person's binding remains native Logos reasoning.
 An independently signed provider supplies the eligibility observation.
 
 Carol's query at a descendant resource requires the complete supplier,
@@ -72,3 +73,12 @@ and show a new proof through an independent route after the first route loses
 support. None of these tests claims current-state selection or a live account
 integration. Receivers select applicable bundles through their own policy
 before using the local proof checker.
+
+The separate wide-operation witness also leaves the operation itself as an
+unconstrained variable. On Logos 0.23.0 it reaches the declared 256 MiB host
+search limit even for this small program. The suite preserves that witness:
+it must either produce a valid proof or report that precise capacity stop,
+never infer prohibition. The runnable concrete-operation profile must produce
+proofs for both vocabularies and pass all missing-support checks. This is a
+measured search limitation, not a restriction on the law or authored syntax;
+see [the embedding capacity issue](https://github.com/Bitspark/logos/issues/3807).

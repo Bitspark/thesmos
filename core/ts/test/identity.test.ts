@@ -64,16 +64,27 @@ test("account actors use full variable and supplier proofs for two unrelated voc
   assert.equal(proofs.length, 2);
 });
 
-test("diagnostic: the same chain with operation-bounded conditional rules", async () => {
-  const verifier = createSpacesVerifier({ root, authenticate: authenticateArchon });
-  for (let i = 0; i < operations.length; i++) {
-    const query = { actor: carol, statement: operations[i]!, space: spaces[i]! };
-    const proof = await prove({ root, query, bundles: accountBundles({ operationBound: true }) }).catch(error => {
-      if (error instanceof ProofSearchError) console.error("Operation-bounded kernel outcome:", JSON.stringify(error.cause));
-      throw error;
-    });
-    assert.equal(verifier.verify({ query, proof }).permitted, true);
+test("a wide-operation policy certifies or reports the precise documented host-capacity stop", async t => {
+  const query = { actor: carol, statement: operations[0]!, space: spaces[0]! };
+  let proof: Uint8Array;
+  try {
+    proof = await prove({ root, query, bundles: accountBundles({ operationBound: false }) });
+  } catch (error) {
+    assert(error instanceof ProofSearchError);
+    assert.equal(error.reason, "not_completed");
+    assert.equal(error.cause.kind, "not_completed");
+    if (error.cause.kind !== "not_completed") throw error;
+    const failure = error.cause.cause.failureCause;
+    assert.equal(failure.kind, "capability_unavailable");
+    if (failure.kind !== "capability_unavailable") throw error;
+    assert.equal(failure.scope, "host");
+    assert.equal(new TextDecoder().decode(failure.component), "wasm");
+    assert.equal(new TextDecoder().decode(failure.capability), "memory");
+    t.diagnostic("The unconstrained operation variable reached the Logos 0.23 host-memory ceiling; no authority denial was inferred.");
+    return;
   }
+  assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon }).verify({ query, proof }).permitted, true);
+  t.diagnostic("The wide-operation policy completed with a valid native proof.");
 });
 
 test("missing supplier, author or conditional support cannot establish the same account query", async () => {
