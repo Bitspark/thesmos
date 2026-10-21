@@ -59,8 +59,8 @@ const portableSource = (bytes: Uint8Array): boolean => {
  * makes no authority decision. Each source remains available whole for later export.
  */
 export class SpacesProgram {
-  readonly #program: MapProgram;
   readonly #programBytes: Uint8Array;
+  readonly #clauseBytes: ReadonlyMap<string, Uint8Array>;
   readonly #sources: ReadonlyMap<string, ClauseSource>;
   readonly #bundles: readonly Source[];
   readonly identity: string;
@@ -68,8 +68,12 @@ export class SpacesProgram {
   readonly payloadBytes: number;
 
   private constructor(program: MapProgram, sources: Map<string, ClauseSource>, bundles: Source[], bytes: number) {
-    this.#program = program;
     this.#programBytes = programBytes(program);
+    // Keep immutable encoded captures, not another full decoded Term graph beside
+    // the native view that Session must defensively capture at its public boundary.
+    const clauses = new Map<string, Uint8Array>();
+    for (const [id, clause] of program.entries()) clauses.set(id, encode(clauseValue(clause)));
+    this.#clauseBytes = clauses;
     this.#sources = sources;
     this.#bundles = bundles;
     this.identity = sha256(this.#programBytes);
@@ -123,6 +127,9 @@ export class SpacesProgram {
     return programFromValue(decode(this.#programBytes));
   }
 
+  /** Canonical bytes with independent ownership, for hashing or artifact capture. */
+  canonicalProgramBytes(): Uint8Array { return Uint8Array.from(this.#programBytes); }
+
   selectedBundles(): readonly SpaceFactsBundle[] { return this.#bundles.map(source => copyBundle(source.bundle)); }
   sourceCosts(): readonly { readonly clauseId: string; readonly group: string; readonly encodedBytes: number; readonly clauses: number; readonly portable: boolean }[] {
     return [...this.#sources].map(([clauseId, { source }]) => ({ clauseId, group: source.key,
@@ -136,8 +143,8 @@ export class SpacesProgram {
       get bundle() { return copyBundle(source.bundle); } };
   }
   clause(id: string): Clause | undefined {
-    const clause = this.#program.clause(ClauseId.of(id));
-    return clause && clauseFromValue(decode(encode(clauseValue(clause))));
+    const bytes = this.#clauseBytes.get(id);
+    return bytes && clauseFromValue(decode(Uint8Array.from(bytes)));
   }
 }
 

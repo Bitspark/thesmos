@@ -134,6 +134,13 @@ Preparation limits bound acquired bundles, clauses and payload bytes separately 
 portable envelope limits. A source is identified by its exact payload and authentication bytes.
 Two sources containing equal clauses remain separate alternatives with distinct original clause
 IDs. A whole signed output is indivisible at export.
+The source capture retains canonical program bytes and individual encoded clauses,
+so it does not keep a second decoded program graph alongside the runtime's native
+view. `nativeProgram()` and `clause(id)` return defensive decoded values;
+`canonicalProgramBytes()` returns an independently owned byte copy for artifact
+capture. Mutating any outward view cannot alter the source identity or later export.
+This ownership choice preserves the existing canonical encoding and does not by
+itself establish that a particular policy fits the process heap or latency target.
 Preparation records whether each complete source fits the frozen envelope's authentication
 depth, tuple-arity and atom-size limits. A source may remain usable locally while required
 portable selection excludes it and considers fitting alternatives.
