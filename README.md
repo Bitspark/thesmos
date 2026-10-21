@@ -15,11 +15,10 @@ available:** the required `@bitspark/logos-contract@0.23.0` and optional client
 dependency `@bitspark/logos-kernel@0.23.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
-Source version `1.0.0-preview.2` is being qualified. A release archive is usable
-only once it is attached to the corresponding GitHub release with its exact
-CI evidence and SHA-256 checksum. The existing
-[v1.0.0-preview.1 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.1)
-does not include `/identity`. Consumers need the stated Logos access; release
+The [v1.0.0-preview.2 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.2)
+provides the qualified archive, exact CI evidence and SHA-256 checksum, including
+the optional `/identity` entry. Its complete gate passed 95 tests and preserved
+all eight frozen artifacts. Consumers need the stated Logos access; release
 archives bundle no private dependency code. The `/client` and `/archon` entries
 still require their optional peers at the versions below.
 
@@ -83,6 +82,8 @@ Alice delegates to Bob, and Bob's variable conditional rule delegates to Carol.
 Separate suppliers support both the grants and the condition. See the
 [identity integration profile](docs/identity.md) for authentication boundaries,
 syntax-only record inspection and the optional `/identity` entry.
+The [evidence-selection profile](docs/evidence-selection.md) explains how a
+receiver can acquire applicable bundles without adding policy to the law.
 
 ## Layout and boundaries
 
