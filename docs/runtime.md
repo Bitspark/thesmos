@@ -2,9 +2,10 @@
 
 Decision record, 21 October 2026. It answers [issue 5](https://github.com/Bitspark/thesmos/issues/5),
 based on an internal design consultation (number 0003: verified advice, evaluated and graded). It
-changes no `law/` artifact and no existing entry point. Nothing described here is implemented yet,
-and no local evaluator is admitted until the gate in [issue 19](https://github.com/Bitspark/thesmos/issues/19)
-passes.
+changes no `law/` artifact and no existing entry point. The optional `/runtime` source now adapts
+Logos prepared sessions, authenticated signed sources and ordinary proof export. Its exact-source
+remote qualification is pending; no local evaluator is admitted until the gate in
+[issue 19](https://github.com/Bitspark/thesmos/issues/19) passes.
 
 ## Why a runtime
 
@@ -124,3 +125,73 @@ the selection result is internal to each receiver. Its public form, with `verify
   separately.
 - **Comparisons:** incremental views against clean rebuilds, and search only where search
   completes.
+
+## Current source interface
+
+`createSpacesRuntime({root, bundles, authenticate, preparationBudget, observationTemplates})`
+authenticates and captures the selected base, then prepares the existing Logos `Session`.
+Preparation limits bound acquired bundles, clauses and payload bytes separately from the frozen
+portable envelope limits. A source is identified by its exact payload and authentication bytes.
+Two sources containing equal clauses remain separate alternatives with distinct original clause
+IDs. A whole signed output is indivisible at export.
+Preparation records whether each complete source fits the frozen envelope's authentication
+depth, tuple-arity and atom-size limits. A source may remain usable locally while required
+portable selection excludes it and considers fitting alternatives.
+
+Every `observationTemplates` entry is a generic Logos `FragmentTemplate`: a native guarded clause,
+a name and explicitly declared ground preparation parameters. `request({query, observations})`
+authenticates supplied observations, matches their exact clause syntax to these declarations and
+submits instances with their original source IDs. It never promotes an observation to an
+extensional fact. New variable policy requires a prepared replacement.
+
+`request()` returns an admitted request with `admission`, `run()` and `close()`. Admission may do
+constructive native demand work, retained for `run()`; measure both calls. `decide()` combines them
+and returns `permitted`, `forbidden` or `unsupported`. Only a completed local absence produces
+`forbidden`. Named Logos refusals remain available on `unsupported.refusal`; acquisition and
+authentication errors throw `PreparationRefused`. Neither is a permission decision.
+
+Runtime, admitted request and retained witness objects expose `diagnostics()` as a direct typed
+view of Logos's read-only counters. Base clauses, index entries, supports, request overlays and
+execution work are logical counts; encoded capsule bytes are measured bytes. They are not heap
+or RSS estimates. Closed live handles report the provider's named error instead of invented zero
+counts. Process memory and its peak must be measured separately by the host.
+Closing a runtime, request or witness releases its owned host references to policy and signed
+source data as well as its native handle. Closed objects reject new work; an operation already
+started keeps its captured context until it settles. An independently retained witness survives
+request and runtime closure until the witness itself closes.
+
+A permitted result owns a witness. Close it after use. The default fast path asks Logos for no
+ordinary generated account and separately retains private support; `witness.export()` materializes
+that support, maps exact source IDs to complete signed bundles and checks the unchanged proof.
+It performs no search and remains available after the request, base replacement and owner retire.
+An optional export can return `unavailable` while the local permission remains valid. With
+`portable: 'required'`, native selection considers eligible source alternatives and distinct whole
+bundle byte/clause costs, with ordinary evidence generation and verification explicitly enabled.
+The adapter measures and independently checks the actual final envelope
+before returning the permitted result and its `proof`; a source budget alone is insufficient.
+
+The native portable budget includes FIRM account bytes, the account-node bound and the frozen
+proof-depth and term-depth bounds, so an oversized candidate cannot suppress a fitting alternative.
+The remaining
+Spaces envelope reserve is calculated from the frozen Ontos codec: the outer tuple header, encoded
+format/law/layer values, the bundle tuple header at the maximum group count, and the account atom
+header at the maximum wrapped account byte length. It also includes the public
+`proof-interchange/derivation/v1` tuple and tag around the native FIRM payload. Bundle children are
+charged separately in full.
+Original `supplied/<64 hex digits>/<index>` rule IDs become shorter `bundle/<position>/<index>`
+IDs; export asserts that this never enlarges an atom. All other account nodes remain unchanged,
+so the measured native account plus that reserve is a conservative byte bound. Boundary tests
+compare the reserve with actual envelope bytes across unsigned-LEB128 length/arity changes and
+an independently accepted law-only proof, which has no source IDs to shorten.
+
+`replace(bundles)` prepares the new base before publishing it atomically. Already opened requests
+and retained witnesses keep their original interpretation. This first adapter rebuilds replacement
+views; it does not claim incremental retraction maintenance. `baseIdentity` identifies exact source
+contents. A consumer whose record projection depends on actor, credential or time must include
+that dependency in base selection; an authority revision label is not proof that two bases match.
+
+The built-in factory, finite admission and source selection require the Logos prepared-session
+candidate. The Nightyard source-pinned gate builds its exact guest and packages, runs this
+repository's complete check with an independent candidate tarball install, and then exercises the
+actual guarded policy. The normal package pins must advance to a qualified Logos release before
+this source becomes a releasable runtime.

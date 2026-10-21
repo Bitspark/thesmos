@@ -15,6 +15,11 @@ available:** the required `@bitspark/logos-contract@0.24.0` and optional client
 dependency `@bitspark/logos-kernel@0.24.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
+The optional [`/runtime` source](docs/runtime.md#current-source-interface) adds a thin adapter for
+Logos prepared sessions and retained witness export. It requires the prepared-session Logos
+candidate and remains unqualified until the complete remote consumer gate passes. The released
+0.24.0 dependencies below do not contain that candidate API.
+
 The [v1.0.0-preview.2 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.2)
 provides the qualified archive, exact CI evidence and SHA-256 checksum, including
 the optional `/identity` entry. Its complete gate passed 95 tests and preserved

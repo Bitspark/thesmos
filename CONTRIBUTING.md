@@ -21,6 +21,10 @@ TypeScript tests, the service examples and an independently installed tarball,
 including each entry point's import isolation: the root and `/identity` import no
 search engine, signing library, network module or other entry, and `/archon`
 imports no search engine.
+The optional `/runtime` may import Logos kernel but imports no Archon or network code.
+Its exact-source candidate gate uses paired Logos package archives in the independent packed
+consumer; record their source and hashes. That gate does not qualify unchanged released dependency
+pins for an API they do not expose.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read

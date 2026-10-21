@@ -11,6 +11,7 @@
     "./client": { "types": "./dist/core/ts/src/client.d.ts", "default": "./dist/core/ts/src/client.js" },
     "./archon": { "types": "./dist/core/ts/src/archon.d.ts", "default": "./dist/core/ts/src/archon.js" },
     "./identity": { "types": "./dist/core/ts/src/identity.d.ts", "default": "./dist/core/ts/src/identity.js" },
+    "./runtime": { "types": "./dist/core/ts/src/runtime.d.ts", "default": "./dist/core/ts/src/runtime.js" },
     "./law/*": "./law/*"
   },
   "files": ["dist/core/ts/src", "law", "README.md", "LICENSE", "NOTICE"],
