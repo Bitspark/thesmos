@@ -13,6 +13,7 @@ const [pack] = Object.values(JSON.parse(npm(["pack", "--ignore-scripts", "--json
 assert(pack.files.some(file => file.path === "law/common-law.ontos"));
 assert(pack.files.some(file => file.path === "dist/core/ts/src/client.d.ts"));
 assert(pack.files.some(file => file.path === "dist/core/ts/src/identity.d.ts"));
+assert(pack.files.some(file => file.path === "dist/core/ts/src/runtime.d.ts"));
 assert(pack.files.every(file => !/node_modules|test\/|examples\/|\.git\//.test(file.path)));
 // The lockfile's dependency URLs preserve the selected private Logos artifacts.
 // Use an independent package installation, not workspace imports.
@@ -25,17 +26,27 @@ writeFileSync(join(directory, "package.json"), JSON.stringify(consumer));
 writeFileSync(join(directory, "package-lock.json"), JSON.stringify(lock));
 npm(["ci", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit"], directory);
 npm(["install", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit", join(directory, pack.filename)], directory);
+// A downstream source-candidate gate supplies the two archives built from its
+// recorded Logos revision. This remains an independent packed installation.
+const candidate = [process.env.THESMOS_CANDIDATE_LOGOS_CONTRACT, process.env.THESMOS_CANDIDATE_LOGOS_KERNEL];
+if (candidate.some(Boolean)) {
+  assert(candidate.every(Boolean) && /^[a-f0-9]{40}$/.test(process.env.LOGOS_REVISION ?? ""), "Candidate packages require an exact paired source pin");
+  npm(["install", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit", "--no-save", ...candidate], directory);
+}
 writeFileSync(join(directory, "check.mjs"), `
 import { strict as assert } from 'node:assert';
 import { atom, attributedClause, createSpacesVerifier, inspectAttributedClause, lawDigest, path, fact } from '@bitspark/thesmos';
 import { prove } from '@bitspark/thesmos/client';
 import { authenticateArchon } from '@bitspark/thesmos/archon';
 import { issuerSubjectPrincipal, decodeIssuerSubjectPrincipal } from '@bitspark/thesmos/identity';
+import { prepareSpacesProgram } from '@bitspark/thesmos/runtime';
 assert.equal(lawDigest.bytes().length, 32);
 const account = issuerSubjectPrincipal('https://accounts.example', 'alice');
 assert.deepEqual(decodeIssuerSubjectPrincipal(account), {issuer: 'https://accounts.example', subject: 'alice'});
 assert.equal(inspectAttributedClause(attributedClause(account, path(), fact('example'))).author.equals(account), true);
 const root = atom('synthetic-test-root');
+assert(prepareSpacesProgram({bundles: [], authenticate: authenticateArchon,
+  budget: {maxBundles: 0, maxClauses: 0, maxPayloadBytes: 0}}).nativeProgram().size() > 0);
 const query = {actor: root, space: path('child'), statement: fact('operation')};
 const proof = await prove({root, query, bundles: []});
 assert.equal(createSpacesVerifier({root, authenticate: authenticateArchon}).verify({query, proof}).permitted, true);
@@ -52,6 +63,7 @@ const entries = {
   "./identity": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network], noEntries: true },
   "./archon": { forbidden: ["@bitspark/logos-kernel", ...network] },
   "./client": { forbidden: [...network] },
+  "./runtime": { forbidden: ["@bitspark/archon", ...network] },
 };
 // Wildcard exports may only expose the law's data files; every code entry needs a rule.
 for (const [key, target] of Object.entries(manifest.exports)) {
