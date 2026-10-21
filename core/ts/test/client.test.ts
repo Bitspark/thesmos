@@ -2,15 +2,18 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { getPublicKey, sign, signInDomain } from "@bitspark/archon";
 import { Atom } from "@bitspark/logos-contract";
-import { loadSearcher } from "@bitspark/logos-kernel";
+import { loadSearcher, RunLimits } from "@bitspark/logos-kernel";
 import { encodeInt } from "@bitspark/ontos-data";
 import {
   atom, authorization, attributedClause, createSpacesVerifier, decodeProof,
   decodeSpaceFacts, encodeProof, encodeSpaceFacts, fact, path,
 } from "../src/index.js";
-import { prove } from "../src/client.js";
+import { prove, ProofSearchError, type ProofSearchFailure } from "../src/client.js";
 import { authenticateArchon, signSpaceFacts } from "../src/archon.js";
 import { bob, documentBundles, root, runDocumentExample, space, statement } from "../../../examples/document-service.js";
+
+const failsAs = (reason: ProofSearchFailure) => (error: unknown) =>
+  error instanceof ProofSearchError && error.reason === reason;
 
 test("native Logos search constructs the complete document proof", async () => {
   const { proof, query } = await runDocumentExample();
@@ -54,7 +57,7 @@ test("native search binds an authored variable rule and checks each conclusion",
   const verifier = createSpacesVerifier({ root: anchor, authenticate: authenticateArchon });
   assert.equal(verifier.verify({ query, proof }).permitted, true);
   assert.equal(verifier.verify({ query: { ...query, statement: edit8 }, proof }).permitted, false);
-  await assert.rejects(prove({ root: anchor, query: { ...query, statement: edit8 }, bundles }), /No proof|could not construct/);
+  await assert.rejects(prove({ root: anchor, query: { ...query, statement: edit8 }, bundles }), failsAs("exhausted"));
 });
 
 test("an ancestor can supply child facts directly and delegation retains its right", async () => {
@@ -78,5 +81,12 @@ test("valid signatures cannot bootstrap a self-appointed supplier", async () => 
     attributedClause(outsider, space, authorization(outsider, atom("supply_facts"), space)),
     attributedClause(outsider, space, authorization(bob, statement, space)),
   ] }, seed)];
-  await assert.rejects(prove({ root, query, bundles }), /No proof|could not construct/);
+  await assert.rejects(prove({ root, query, bundles }), failsAs("exhausted"));
+});
+
+test("a search stopped before completion is not reported as exhausted", async () => {
+  const query = { actor: bob, space, statement };
+  const limits = { ...RunLimits.default(), searchNodes: 1 };
+  await assert.rejects(prove({ root, query, bundles: documentBundles(), limits }), failsAs("not_completed"));
+  await assert.rejects(prove({ root, query, bundles: documentBundles() }, AbortSignal.abort()), failsAs("not_completed"));
 });
