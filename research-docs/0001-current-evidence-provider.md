@@ -319,6 +319,12 @@ reviewed and delivered as main `f8b69abda15a6a3c964c664cdf0063d0c64dcbae` and
 `v1.0.0-preview.2`; its source gates passed 95 tests and all eight frozen-artifact
 checks. The Accounts source review is not its full gate or live qualification.
 
+After this evaluation, [PR17](https://github.com/Bitspark/thesmos/pull/17)
+implemented whole-bundle proof pruning on `main` at
+`32e381410fa5998eed3c94a1ea28015331b08dc9`. This source change is absent from the
+immutable preview.2 archive used by Accounts. Row 19 therefore tracks deferred
+adoption in that qualified consumer, not an algorithm still missing on `main`.
+
 In the table, **SDK** is the thesmos maintainer; **Accounts** is the receiving
 implementation owner; **Auditor** is the independent platform reviewer.
 
@@ -342,7 +348,7 @@ implementation owner; **Auditor** is the independent platform reviewer.
 | 16 | Separate current selection from cached immutable objects | NEEDS ADAPTATION | Existing selection over stored bundles already provides this composition; add no manifest protocol. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Stable-byte and changed-membership cases; exact gate pending. |
 | 17 | Select only proof-relevant positive evidence | DEFERRED | Trigger: full bounded selection exceeds an actual receiver budget. Extend the same adapter if required. | SDK; receiving service | [Issue 7](https://github.com/Bitspark/thesmos/issues/7) | No optimization is claimed for current full selections. |
 | 18 | Permit receiver-owned proof construction | HOLDS | Prove using receiver-selected bundles and verify the same actual query before effect. | Accounts | [PR63](https://github.com/Bitspark/bitspark-accounts/pull/63) | Actual actor/title/effect and final current-selection tests; exact gate pending. |
-| 19 | Prune unused bundles | DEFERRED | Keep the existing scoped pruning work separate. Until delivered, rebuild proofs using surviving selections. | SDK | [Issue 9](https://github.com/Bitspark/thesmos/issues/9) | New proof through an alternative succeeds; old unused deselected evidence is not silently current. |
+| 19 | Prune unused bundles | DEFERRED | Adopt the later PR17 source only through a qualified release and receiving gate. The current preview.2 consumer rebuilds proofs using surviving selections. | SDK; Accounts | [PR17](https://github.com/Bitspark/thesmos/pull/17) | New proof through an alternative succeeds; every bundle still carried by a proof must remain selected. Later pruning never splits or changes a signed bundle. |
 
 No mandatory author signature, publication privilege, global lease, expiry
 default, role registry, new law axiom or cascading revocation is accepted.
