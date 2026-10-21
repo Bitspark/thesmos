@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { getPublicKey } from "@bitspark/archon";
 import { Atom, Clause, DERIVATION_WIRE_V1_TAG, Goal, Term, Tuple, VarId, clauseFromValue, clauseValue, derivationWirePayloadV1ToValue, programBytes } from "@bitspark/logos-contract";
@@ -72,6 +73,34 @@ test("preparation authenticates copies and retains distinct whole source identit
   const nextAuthor = outwardClause.head.args[0]!;
   if (nextAuthor.kind === "atom") nextAuthor.bytes().fill(0);
   assert.deepEqual(programBytes(prepared.nativeProgram()), captured);
+});
+
+test("encoded program and individual clause captures preserve exact bytes under hostile outward mutation", () => {
+  for (const prepared of [prepareSpacesProgram({ bundles: base(), budget, authenticate: authenticateArchon }),
+    prepareSpacesOverlay({ bundles: [observation("captured")], budget, authenticate: authenticateArchon })]) {
+    const canonical = programBytes(prepared.nativeProgram());
+    const identity = createHash("sha256").update(canonical).digest("hex");
+    assert.equal(prepared.identity, identity);
+    assert.deepEqual(prepared.canonicalProgramBytes(), canonical);
+    assert.equal(prepared.clause("not-selected"), undefined);
+    const clauses = prepared.nativeProgram().entries();
+    for (const [id, original] of clauses) {
+      const captured = prepared.clause(id)!;
+      assert.deepEqual(encode(clauseValue(captured)), encode(clauseValue(original)));
+      const mutate = (term: Term): void => {
+        if (term.kind === "atom") term.bytes().fill(0);
+        if (term.kind === "tuple") for (const child of term.children()) mutate(child);
+      };
+      for (const clause of [original, captured]) {
+        for (const term of clause.head.args) mutate(term);
+        for (const premise of clause.body) for (const term of premise.lit.args) mutate(term);
+      }
+      prepared.canonicalProgramBytes().fill(0);
+      assert.deepEqual(prepared.canonicalProgramBytes(), canonical);
+      assert.deepEqual(programBytes(prepared.nativeProgram()), canonical);
+      assert.equal(prepared.identity, identity);
+    }
+  }
 });
 
 test("the calculated envelope reserve bounds actual codec bytes at varint boundaries", () => {
