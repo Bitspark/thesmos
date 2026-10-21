@@ -46,19 +46,23 @@ process.stdout.write(execFileSync(process.execPath, [join(directory, "check.mjs"
 // Each installed entry point's static import graph keeps search, signing and network code out of
 // the entries that must not carry them: a receiver importing the root installs no search engine.
 const installed = join(directory, "node_modules", "@bitspark", "thesmos");
-const network = ["node:http", "node:https", "node:net", "node:tls", "node:dns", "node:dgram", "http", "https", "net", "tls", "dns"];
+const network = ["http", "https", "http2", "net", "tls", "dns", "dgram"].flatMap(name => [name, "node:" + name]);
 const entries = {
   ".": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network], noEntries: true },
   "./identity": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network], noEntries: true },
   "./archon": { forbidden: ["@bitspark/logos-kernel", ...network] },
   "./client": { forbidden: [...network] },
 };
-const exportFile = key => join(installed, manifest.exports[key].default);
-const entryFiles = new Map(Object.keys(manifest.exports).filter(key => !key.includes("*"))
-  .map(key => [resolve(exportFile(key)), key]));
-for (const key of Object.keys(manifest.exports).filter(key => !key.includes("*"))) {
-  assert(entries[key], `Entry ${key} has no isolation rule in scripts/check-package.mjs`);
+// Wildcard exports may only expose the law's data files; every code entry needs a rule.
+for (const [key, target] of Object.entries(manifest.exports)) {
+  if (key.includes("*")) assert.equal(target, "./law/*", `Wildcard export ${key} must expose only law data`);
+  else {
+    assert.equal(typeof target?.default, "string", `Entry ${key} must declare a default target`);
+    assert(entries[key], `Entry ${key} has no isolation rule in scripts/check-package.mjs`);
+  }
 }
+const exportFile = key => join(installed, manifest.exports[key].default);
+const entryFiles = new Map(Object.keys(entries).map(key => [resolve(exportFile(key)), key]));
 for (const [key, rule] of Object.entries(entries)) {
   const start = resolve(exportFile(key));
   const seen = new Set(), bare = new Set(), reached = new Set();
@@ -69,8 +73,9 @@ for (const [key, rule] of Object.entries(entries)) {
     const source = readFileSync(file, "utf8");
     for (const [, specifier] of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g)) {
       if (specifier.startsWith(".")) visit(resolve(dirname(file), specifier));
-      else if (specifier.startsWith("@bitspark/thesmos/")) {
-        const target = manifest.exports["./" + specifier.slice("@bitspark/thesmos/".length)];
+      else if (specifier === "@bitspark/thesmos" || specifier.startsWith("@bitspark/thesmos/")) {
+        // A self-import resolves through the exports map; law data (./law/*) holds no code.
+        const target = manifest.exports["." + specifier.slice("@bitspark/thesmos".length)];
         if (target) visit(resolve(installed, target.default));
       } else bare.add(specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/"));
     }
