@@ -79,3 +79,51 @@ test("factory phase failures preserve receiver, input, resolved runtime and reje
     process.exitCode = previousExit;
   }
 });
+
+test("temporary factory sink restores its exact descriptor and never overwrites another owner", async () => {
+  const key = Symbol.for("logos.prepared.factory.phase-diagnostic");
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+  const previousMode = process.env.PREPARED_MEASUREMENT_MODE;
+  const previousEvent = process.env.GITHUB_EVENT_PATH;
+  const previousTemporary = process.env.RUNNER_TEMP;
+  const previousExit = process.exitCode;
+  try {
+    process.env.PREPARED_MEASUREMENT_MODE = "exploratory-current";
+    delete process.env.GITHUB_EVENT_PATH;
+    process.env.RUNNER_TEMP = "/dev/null/not-a-directory";
+    Object.defineProperty(globalThis, key, { get() { throw new Error("The diagnostic must not invoke a previous getter"); }, configurable: true, enumerable: true });
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    const input: PreparedInputs = { snapshot: DatasetSnapshot.resolve(Program.empty(), Bindings.empty()), multiplicity: Multiplicity.Set };
+    const runtime: PreparedRuntime = { async request() { throw new Error("No request in this control"); }, close() {} };
+    const factory: PreparedViewFactory = { async prepare(received) {
+      assert.equal(received, input);
+      assert.equal(this, factory);
+      const sink = Object.getOwnPropertyDescriptor(globalThis, key)?.value as (phase: string, edge: string) => void;
+      assert.equal(typeof sink, "function");
+      sink("program-open", "start");
+      sink("program-open", "complete");
+      return runtime;
+    } };
+    assert.equal(await diagnosticFactory(4, factory).prepare(input), runtime);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, key), previous);
+    const rejection = new Error("original factory rejection");
+    await assert.rejects(diagnosticFactory(5, { async prepare() { throw rejection; } }).prepare(input), error => error === rejection);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, key), previous);
+    const anotherOwner = () => {};
+    const changed: PreparedViewFactory = { async prepare() {
+      Object.defineProperty(globalThis, key, { value: anotherOwner, configurable: true });
+      return runtime;
+    } };
+    assert.equal(await diagnosticFactory(6, changed).prepare(input), runtime);
+    assert.equal(Object.getOwnPropertyDescriptor(globalThis, key)?.value, anotherOwner);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    if (originalDescriptor) Object.defineProperty(globalThis, key, originalDescriptor);
+    else Reflect.deleteProperty(globalThis, key);
+    for (const [name, value] of [["PREPARED_MEASUREMENT_MODE", previousMode], ["GITHUB_EVENT_PATH", previousEvent],
+      ["RUNNER_TEMP", previousTemporary]] as const) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+    process.exitCode = previousExit;
+  }
+});

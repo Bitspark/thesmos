@@ -19,7 +19,10 @@ export function runtimeCheckpoint(id: number, phase: string, edge: "start" | "co
   // package checks on this diagnostic source retain the ordinary runtime path.
   if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return;
   try { writeCheckpoint(id, phase, edge, detail); }
-  catch {
+  catch { diagnosticFailure(id, phase, edge); }
+}
+
+function diagnosticFailure(id: number, phase: string, edge: string): void {
     // Observability cannot change a product outcome or prevent its cleanup. A
     // failed probe invalidates this diagnostic process separately, even if both
     // evidence channels fail. The supervisor retains the nonzero process exit.
@@ -27,7 +30,40 @@ export function runtimeCheckpoint(id: number, phase: string, edge: "start" | "co
     const marker = JSON.stringify({ format: "thesmos/cold-runtime-diagnostic-failure/1", activation: id, phase, edge });
     try { appendFileSync(join(process.env.RUNNER_TEMP ?? ".", "prepared-spaces", "runtime-diagnostic-failures.ndjson"), marker + "\n"); } catch { /* exit status remains failed */ }
     try { console.error(marker); } catch { /* exit status remains failed */ }
-  }
+}
+
+function installFactorySink(id: number): () => void {
+  if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return () => {};
+  // The paired temporary logos source reads this private symbol. No source or
+  // runtime graph is passed through it; only this numeric activation is captured.
+  const key = Symbol.for("logos.prepared.factory.phase-diagnostic");
+  const sink = (phase: string, edge: "start" | "complete" | "failed") => {
+    if (!["load-searcher", "program-open", "base-open"].includes(phase) ||
+        !["start", "complete", "failed"].includes(edge)) {
+      diagnosticFailure(id, "factory-sink", "invalid-event");
+      return;
+    }
+    runtimeCheckpoint(id, `logos-${phase}`, edge);
+  };
+  let previous: PropertyDescriptor | undefined;
+  let installed = false;
+  try {
+    previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value: sink, writable: true, configurable: true });
+    installed = true;
+  } catch { diagnosticFailure(id, "factory-sink", "install-failed"); }
+  return () => {
+    if (!installed) return;
+    try {
+      const current = Object.getOwnPropertyDescriptor(globalThis, key);
+      if (current?.value !== sink) {
+        diagnosticFailure(id, "factory-sink", "ownership-changed");
+        return;
+      }
+      if (previous) Object.defineProperty(globalThis, key, previous);
+      else if (!Reflect.deleteProperty(globalThis, key)) throw new Error("Diagnostic sink could not be removed");
+    } catch { diagnosticFailure(id, "factory-sink", "restore-failed"); }
+  };
 }
 
 function writeCheckpoint(id: number, phase: string, edge: "start" | "complete" | "failed", detail?: string): void {
@@ -67,6 +103,7 @@ export function runtimePhase<T>(id: number, phase: string, operation: () => T): 
 export function diagnosticFactory(id: number, factory: PreparedViewFactory): PreparedViewFactory {
   return {
     async prepare(input) {
+      const restoreSink = installFactorySink(id);
       runtimeCheckpoint(id, "factory-prepare", "start");
       try {
         // Invoke the actual receiver; the wrapper owns neither the input nor the
@@ -77,7 +114,7 @@ export function diagnosticFactory(id: number, factory: PreparedViewFactory): Pre
       } catch (error) {
         runtimeCheckpoint(id, "factory-prepare", "failed", "Factory preparation threw; its original exception is preserved");
         throw error;
-      }
+      } finally { restoreSink(); }
     },
   };
 }

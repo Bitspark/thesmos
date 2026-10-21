@@ -22,8 +22,20 @@ await that same operation. The exact input, resolved runtime and rejection objec
 are forwarded; the wrapper neither closes nor retains the runtime. It stores no
 source graph in telemetry and does not change operation order or the product
 source. The original probe remains a separate immutable baseline. The next run
-must identify this new diagnostic revision and use the same Logos pin, Node
-`24.22.0` and default heap.
+must identify its exact diagnostic and logos revisions, Node `24.22.0` and
+default heap. Probe `39683230748` at logos `3489763a4feee934bf288d68896df15bc19902f8`
+passed the owner capture and returned a guest allocation failure inside the
+factory at the declared 4,096-page limit. It completed no request.
+
+The next temporary paired logos diagnostic distinguishes its actual searcher
+load, `program_open` and `base_open` calls. During the factory operation only,
+this wrapper installs the private symbol `logos.prepared.factory.phase-diagnostic`
+and routes its fixed scalar events through the existing source-bound sink. It
+restores the exact previous property descriptor only while it still owns that
+property. Installation, ownership or restoration failures invalidate telemetry
+without changing the factory result or error. The sink closes over a numeric
+activation ID only and stores no program, input, factory or returned runtime.
+The temporary hook is neither an exported product API nor release source.
 
 The explicit remote Nightyard `profile-current` route records checkpoints around
 configuration capture, authenticated source capture, defensive native program
