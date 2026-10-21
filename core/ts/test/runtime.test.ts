@@ -51,7 +51,7 @@ test("preparation authenticates copies and retains distinct whole source identit
   } });
   assert.equal(prepared.clauseCount, 2);
   assert.equal(new Set(prepared.sourceCosts().map(source => source.group)).size, 2);
-  assert.deepEqual(prepared.selectedBundles()[0]!.payload, one.payload);
+  assert.deepEqual(prepared.selectedBundles()[0]!.payload, Uint8Array.from(one.payload));
   one.payload.fill(0);
   assert(prepared.selectedBundles()[0]!.payload.some(byte => byte !== 0));
   prepared.selectedBundles()[0]!.payload.fill(0);
