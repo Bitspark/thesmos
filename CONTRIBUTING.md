@@ -11,7 +11,10 @@ No TypeScript code may implement a second authority evaluator.
 Use a task worktree, branch and pull request. Run `npm run check`, obtain an
 independent review of the exact change, and squash merge after the required
 checks pass. The gate checks compiled law identity, frozen artifacts, conformance,
-TypeScript tests, both service examples and an independently installed tarball.
+TypeScript tests, the service examples and an independently installed tarball,
+including each entry point's import isolation: the root and `/identity` import no
+search engine, signing library, network module or other entry, and `/archon`
+imports no search engine.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read
