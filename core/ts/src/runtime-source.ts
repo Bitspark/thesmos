@@ -3,7 +3,7 @@ import {
   Atom, ClauseId, DERIVATION_WIRE_V1_TAG, Derivation, MapProgram, RuleNode, Tuple, clauseFromValue, clauseValue, programBytes, programFromValue,
   type Clause, type Value,
 } from "@bitspark/logos-contract";
-import { decode, encode, encodeUvarint } from "@bitspark/ontos-codec";
+import { DecodeError, decode, encode, encodeUvarint } from "@bitspark/ontos-codec";
 import { decodeSpaceFacts } from "./bundles.js";
 import { loadLaw, lawDigest, layerDigest, protocol } from "./data.js";
 import { atom, suppliedClause } from "./encoding.js";
@@ -33,6 +33,7 @@ type Source = {
   readonly bundle: SpaceFactsBundle;
   readonly clauses: number;
   readonly encodedBytes: number;
+  readonly portable: boolean;
 };
 type ClauseSource = { readonly source: Source; readonly index: number };
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -40,6 +41,18 @@ const copyBundle = (bundle: SpaceFactsBundle): SpaceFactsBundle => ({
   payload: Uint8Array.from(bundle.payload), authentication: decode(encode(bundle.authentication)),
 });
 const validBound = (n: number) => Number.isSafeInteger(n) && n >= 0;
+const portableSource = (bytes: Uint8Array): boolean => {
+  try {
+    // The final envelope and bundle collection add two enclosing tuples. Payload
+    // bytes remain opaque here; decodeSpaceFacts already checked their own limits.
+    decode(bytes, { maxDepth: protocol.limits.maxWireDepth - 2,
+      maxTupleArity: protocol.limits.maxProofSteps, maxAtomBytes: protocol.limits.maxProofBytes });
+    return true;
+  } catch (error) {
+    if (error instanceof DecodeError && error.code === "limit_exceeded") return false;
+    throw error;
+  }
+};
 
 /**
  * Exact authenticated selected sources and their guarded native clauses. This object
@@ -93,7 +106,8 @@ export class SpacesProgram {
       const sourceBytes = encode(new Tuple([new Atom(bundle.payload), bundle.authentication]));
       const sourceKey = sha256(sourceBytes);
       if (unique.has(sourceKey)) continue;
-      const source: Source = { key: sourceKey, bundle, clauses: output.clauses.length, encodedBytes: sourceBytes.byteLength };
+      const source: Source = { key: sourceKey, bundle, clauses: output.clauses.length,
+        encodedBytes: sourceBytes.byteLength, portable: portableSource(sourceBytes) };
       unique.set(sourceKey, source);
       for (const [index, assertion] of output.clauses.entries()) {
         const id = `supplied/${sourceKey}/${index}`;
@@ -110,9 +124,9 @@ export class SpacesProgram {
   }
 
   selectedBundles(): readonly SpaceFactsBundle[] { return this.#bundles.map(source => copyBundle(source.bundle)); }
-  sourceCosts(): readonly { readonly clauseId: string; readonly group: string; readonly encodedBytes: number; readonly clauses: number }[] {
+  sourceCosts(): readonly { readonly clauseId: string; readonly group: string; readonly encodedBytes: number; readonly clauses: number; readonly portable: boolean }[] {
     return [...this.#sources].map(([clauseId, { source }]) => ({ clauseId, group: source.key,
-      encodedBytes: source.encodedBytes, clauses: source.clauses }));
+      encodedBytes: source.encodedBytes, clauses: source.clauses, portable: source.portable }));
   }
   source(id: string): { readonly key: string; readonly index: number; readonly clauses: number; readonly bundle: SpaceFactsBundle } | undefined {
     const found = this.#sources.get(id);

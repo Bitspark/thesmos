@@ -194,3 +194,27 @@ test("a rejected required export releases its detached witness", async t => {
     assert.equal(closed, 1);
   } finally { runtime.close(); }
 });
+
+test("required export chooses a source whose authentication fits the frozen envelope", async () => {
+  const query = { actor, statement: atom("synthetic-action"), space: service };
+  const source = sign([attributedClause(root, path(), authorization(actor, query.statement, service))]);
+  let authentication: Atom | Tuple = atom("synthetic-authentication");
+  for (let depth = 0; depth < protocol.limits.maxWireDepth; depth++) authentication = new Tuple([authentication]);
+  const deep = { payload: source.payload, authentication };
+  const normal = { payload: source.payload, authentication: atom("synthetic-shallow-authentication") };
+  const authenticate = () => true;
+  const prepared = prepareSpacesProgram({ bundles: [deep, normal], authenticate, budget });
+  assert.deepEqual(prepared.sourceCosts().map(cost => cost.portable), [false, true]);
+  const runtime = await createSpacesRuntime({ root, bundles: [deep, normal], authenticate, preparationBudget: budget });
+  try {
+    const decision = await runtime.decide({ query, observations: [], portable: "required" });
+    assert.equal(decision.kind, "permitted", decision.kind === "unsupported" ? decision.detail : undefined);
+    if (decision.kind !== "permitted") return;
+    try {
+      assert(decision.proof);
+      const carried = decodeProof(decision.proof).bundles;
+      assert.equal(carried.length, 1);
+      assert(carried[0]!.authentication.equals(normal.authentication));
+    } finally { decision.witness.close(); }
+  } finally { runtime.close(); }
+});

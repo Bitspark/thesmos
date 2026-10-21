@@ -4,6 +4,7 @@ import {
 import {
   Bindings, ComponentBinding, Digest, DoorReplyError, Multiplicity, PreparedSessionError, Program, Session, WasmPreparedFactory, deriveCheckProfileSpec,
   type CatalogSupportPolicy, type FragmentTemplate, type PreparedAdmission, type RunLimits,
+  type PreparedQueryDiagnostics, type PreparedViewDiagnostics, type PreparedWitnessDiagnostics,
   type KernelOutcome, type PreparedQuery, type PreparedViewFactory,
   type PreparedViewLease, type RetainedPreparedWitness,
 } from "@bitspark/logos-kernel";
@@ -49,6 +50,7 @@ export class SpacesWitness {
     private readonly authenticate: AuthenticateSpaceFacts,
   ) {}
 
+  diagnostics(): PreparedWitnessDiagnostics { return this.retained.diagnostics(); }
   async export(budget?: CarryingBudget): Promise<SpacesExport> {
     const candidate = await this.retained.export();
     if (!candidate.derivation) return { kind: "unavailable", reason: "invalid-witness", detail: "Retained support exported no derivation" };
@@ -80,6 +82,7 @@ export interface SpacesRequestOptions {
 export interface SpacesPreparedRequest {
   /** Admission includes native constructive demand work; it is not a free syntax check. */
   readonly admission: PreparedAdmission;
+  diagnostics(): PreparedQueryDiagnostics;
   run(): Promise<SpacesRuntimeDecision>;
   close(): void;
 }
@@ -123,6 +126,7 @@ export class SpacesRuntime {
   }
 
   get baseIdentity(): string { return this.#base.identity; }
+  diagnostics(): PreparedViewDiagnostics { return this.#lease.diagnostics(); }
 
   /** Replacement is prepared before publication. Existing requests keep their old lease. */
   async replace(bundles: readonly SpaceFactsBundle[]): Promise<void> {
@@ -150,6 +154,7 @@ export class SpacesRuntime {
     for (const program of programs) {
       for (const [id] of program.nativeProgram().entries()) rules.set(id, []);
       for (const source of program.sourceCosts()) {
+        if (!source.portable) { rules.delete(source.clauseId); continue; }
         groups.set(source.group, { id: source.group, encodedBytes: source.encodedBytes, clauses: source.clauses });
         rules.set(source.clauseId, [source.group]);
       }
@@ -184,7 +189,7 @@ export class SpacesRuntime {
       support: required ? this.#portableSupport([base, overlay], carryingBudget) : { kind: "local" },
       evidence: required ? { policy: "generate", retention: "retain", verify: { kind: "every" } }
         : { policy: "none", retention: "discard", verify: { kind: "none" } }, witnessCapture: "retain" });
-    return { admission: execution.admission(), close: () => execution.close(), run: async () => {
+    return { admission: execution.admission(), diagnostics: () => execution.diagnostics(), close: () => execution.close(), run: async () => {
       const result = await execution.run(signal), snapshot = hex(result.snapshot.bytes);
       if (result.completion.kind === "incomplete") return { kind: "unsupported", detail: result.completion.reason, outcome: result.outcome };
       if (result.completion.kind === "absent") return { kind: "forbidden", snapshot, outcome: result.outcome };

@@ -134,6 +134,9 @@ Preparation limits bound acquired bundles, clauses and payload bytes separately 
 portable envelope limits. A source is identified by its exact payload and authentication bytes.
 Two sources containing equal clauses remain separate alternatives with distinct original clause
 IDs. A whole signed output is indivisible at export.
+Preparation records whether each complete source fits the frozen envelope's authentication
+depth, tuple-arity and atom-size limits. A source may remain usable locally while required
+portable selection excludes it and considers fitting alternatives.
 
 Every `observationTemplates` entry is a generic Logos `FragmentTemplate`: a native guarded clause,
 a name and explicitly declared ground preparation parameters. `request({query, observations})`
@@ -146,6 +149,12 @@ constructive native demand work, retained for `run()`; measure both calls. `deci
 and returns `permitted`, `forbidden` or `unsupported`. Only a completed local absence produces
 `forbidden`. Named Logos refusals remain available on `unsupported.refusal`; acquisition and
 authentication errors throw `PreparationRefused`. Neither is a permission decision.
+
+Runtime, admitted request and retained witness objects expose `diagnostics()` as a direct typed
+view of Logos's read-only counters. Base clauses, index entries, supports, request overlays and
+execution work are logical counts; encoded capsule bytes are measured bytes. They are not heap
+or RSS estimates. Closed live handles report the provider's named error instead of invented zero
+counts. Process memory and its peak must be measured separately by the host.
 
 A permitted result owns a witness. Close it after use. The default fast path asks Logos for no
 ordinary generated account and separately retains private support; `witness.export()` materializes
