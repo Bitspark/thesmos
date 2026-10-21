@@ -4,6 +4,18 @@ on:
     branches: [main, 'core/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Check committed sources, or prepare a reviewable released-dependency patch
+        type: choice
+        options: [check, refresh-dependencies]
+        default: check
+      logos_version:
+        description: Exact published logos package version for a dependency refresh
+        required: false
+      package_version:
+        description: Exact thesmos package version for a dependency refresh
+        required: false
 permissions:
   contents: read
 jobs:
@@ -18,7 +30,7 @@ jobs:
   sdk:
     # Private Logos packages are available only to maintained repository code.
     # External PRs receive the public source checks, pending dependency publication.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && inputs.operation != 'refresh-dependencies'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,6 +49,81 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: thesmos-package
-          path: .build-artifacts/*.tgz
+          path: |
+            .build-artifacts/*.tgz
+            .build-artifacts/SHA256SUMS
+            .build-artifacts/release-artifact.json
           include-hidden-files: true
+          if-no-files-found: error
+
+  dependency-refresh:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'refresh-dependencies'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@bitspark'
+      - name: Select exact released dependencies
+        env:
+          LOGOS_VERSION: ${{ inputs.logos_version }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+        run: |
+          test -z "$(git status --porcelain)"
+          node --input-type=module <<'JS'
+          import {readFileSync, writeFileSync} from 'node:fs';
+          const exact = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
+          const logos = process.env.LOGOS_VERSION, version = process.env.PACKAGE_VERSION;
+          if (!exact.test(logos ?? '') || !exact.test(version ?? '')) throw new Error('Exact package versions are required');
+          const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+          manifest.version = version;
+          manifest.dependencies['@bitspark/logos-contract'] = logos;
+          manifest.peerDependencies['@bitspark/logos-kernel'] = logos;
+          manifest.devDependencies['@bitspark/logos-kernel'] = logos;
+          writeFileSync('package.json', JSON.stringify(manifest, null, 2)+'\n');
+          JS
+      - name: Resolve the published cohort remotely
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGE_READ_TOKEN }}
+        run: npm install --package-lock-only --ignore-scripts --allow-remote=all --no-audit
+      - name: Preserve a source patch without committing or publishing it
+        env:
+          LOGOS_VERSION: ${{ inputs.logos_version }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dependency-refresh"
+          git diff --binary -- package.json package-lock.json > "$RUNNER_TEMP/dependency-refresh/dependency.patch"
+          node --input-type=module <<'JS'
+          import {createHash} from 'node:crypto';
+          import {readFileSync, writeFileSync} from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          const digest = file => createHash('sha256').update(readFileSync(file)).digest('hex');
+          const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+          const packages = Object.fromEntries(['logos-contract','logos-kernel'].map(name => {
+            const entry = lock.packages[`node_modules/@bitspark/${name}`];
+            if (entry?.version !== process.env.LOGOS_VERSION || !entry.integrity || !entry.resolved) throw new Error(`Wrong published ${name} resolution`);
+            return [name, {version: entry.version, resolved: entry.resolved, integrity: entry.integrity}];
+          }));
+          const changed = execFileSync('git', ['diff', '--name-only'], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
+          if (changed.some(file => !['package.json','package-lock.json'].includes(file))) throw new Error('Unexpected source mutation');
+          const directory = `${process.env.RUNNER_TEMP}/dependency-refresh`;
+          const receipt = {inputHead: execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(), run: process.env.GITHUB_RUN_ID,
+            packageVersion: process.env.PACKAGE_VERSION, logosVersion: process.env.LOGOS_VERSION, packages,
+            node: process.version, npm: execFileSync('npm',['--version'],{encoding:'utf8'}).trim(),
+            sourceFiles: Object.fromEntries(['package.json','package-lock.json'].map(file => [file,digest(file)])),
+            patchSha256: digest(`${directory}/dependency.patch`), qualification: 'pending committed-source check'};
+          writeFileSync(`${directory}/receipt.json`, JSON.stringify(receipt,null,2)+'\n');
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thesmos-dependency-refresh-${{ github.run_id }}
+          path: ${{ runner.temp }}/dependency-refresh
           if-no-files-found: error

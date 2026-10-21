@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -101,4 +102,13 @@ console.log(`Entry isolation holds for ${Object.keys(entries).join(", ")}.`);
 // Retain the exact archive that passed the independent consumer check.
 mkdirSync(".build-artifacts", { recursive: true });
 copyFileSync(join(directory, pack.filename), join(".build-artifacts", pack.filename));
+const archiveSha256 = createHash("sha256").update(readFileSync(join(directory, pack.filename))).digest("hex");
+writeFileSync(join(".build-artifacts", "SHA256SUMS"), `${archiveSha256}  ${pack.filename}\n`);
+writeFileSync(join(".build-artifacts", "release-artifact.json"), JSON.stringify({
+  source: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+  run: process.env.GITHUB_RUN_ID ?? null, node: process.version, packedConsumer: "passed",
+  package: { name: manifest.name, version: manifest.version, filename: pack.filename,
+    bytes: readFileSync(join(directory, pack.filename)).byteLength, sha256: archiveSha256, integrity: pack.integrity },
+  dependencies: manifest.dependencies, peerDependencies: manifest.peerDependencies,
+}, null, 2) + "\n");
 console.log(`Package inspected: ${pack.filename} (${pack.files.length} files). Temporary consumer: ${directory}`);
