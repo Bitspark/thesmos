@@ -61,6 +61,26 @@ test("native search binds an authored variable rule and checks each conclusion",
   await assert.rejects(prove({ root: anchor, query: { ...query, statement: edit8 }, bundles }), failsAs("exhausted"));
 });
 
+test("a proof carries only the bundles its derivation uses, each byte for byte", async () => {
+  const seed = new Uint8Array(32).fill(12), anchor = new Atom(getPublicKey(seed));
+  const child = path("a", "b"), actor = atom("actor"), operation = fact("edit", atom("item"));
+  const unused = (name: string) => signSpaceFacts({ supplier: anchor, space: path(name), assertedAt: encodeInt(0n),
+    clauses: [attributedClause(anchor, path(name), authorization(atom("someone"), fact("noop"), path(name)))] }, seed);
+  const used = signSpaceFacts({ supplier: anchor, space: child, assertedAt: encodeInt(0n),
+    clauses: [attributedClause(anchor, child, authorization(actor, operation, child))] }, seed);
+  const query = { actor, statement: operation, space: child };
+  const proof = await prove({ root: anchor, query, bundles: [unused("first"), used, unused("last")] });
+  const decoded = decodeProof(proof);
+  assert.equal(decoded.bundles.length, 1);
+  assert.deepEqual(decoded.bundles[0]!.payload, used.payload);
+  assert.equal(decoded.bundles[0]!.authentication.equals(used.authentication), true);
+  const verifier = createSpacesVerifier({ root: anchor, authenticate: authenticateArchon });
+  assert.equal(verifier.verify({ query, proof }).permitted, true);
+  // References are renumbered with the bundles: restoring an unused bundle in front breaks them.
+  const shifted = encodeProof({ ...decoded, bundles: [unused("first"), ...decoded.bundles] });
+  assert.equal(verifier.verify({ query, proof: shifted }).permitted, false);
+});
+
 test("an ancestor can supply child facts directly and delegation retains its right", async () => {
   const seed = new Uint8Array(32).fill(10), anchor = new Atom(getPublicKey(seed));
   const child = path("a", "b"), actor = atom("actor"), operation = fact("edit", atom("item"));
