@@ -68,6 +68,21 @@ export async function prove(request: ProveRequest, signal?: AbortSignal): Promis
     if (node.conclusion.equals(anchor) && node.premises.length === 0) return new LeafNode(anchor);
     throw new Error("Logos proof names a clause outside the supplied program");
   });
-  return encodeProof({ law: lawDigest, layer: layerDigest, bundles: request.bundles,
-    derivation: new Derivation(nodes, derivation.root) });
+
+  // Carry only the bundles the derivation uses, each whole: a bundle is signed as one
+  // payload, so used bundles keep their exact bytes and unused ones are not disclosed.
+  const bundleRef = /^bundle\/(\d+)\/(\d+)$/;
+  const used = [...new Set(nodes.flatMap(node => {
+    const match = node.kind === "rule" ? bundleRef.exec(node.clause.asStr()) : null;
+    return match ? [Number(match[1])] : [];
+  }))].sort((a, b) => a - b);
+  const position = new Map(used.map((index, kept) => [index, kept]));
+  const pruned = nodes.map(node => {
+    if (node.kind !== "rule") return node;
+    const match = bundleRef.exec(node.clause.asStr());
+    return match ? new RuleNode(node.conclusion, ClauseId.of(`bundle/${position.get(Number(match[1]))}/${match[2]}`),
+      node.subst, node.premises) : node;
+  });
+  return encodeProof({ law: lawDigest, layer: layerDigest, bundles: used.map(index => request.bundles[index]!),
+    derivation: new Derivation(pruned, derivation.root) });
 }

@@ -63,6 +63,13 @@ engine failure, a request Logos refused, or Logos 0.23.0's fixed 256 MiB search
 memory, which no request field raises yet. Neither reason proves the operation
 is prohibited.
 
+A returned proof carries only the bundles its derivation uses, each unchanged.
+Pruning works per bundle: a used bundle is disclosed in full, because it is
+signed as one payload. An asserter that needs finer disclosure, or wants a
+change to one record to leave other proofs intact, should keep records that
+change together in separate bundles. Every bundle given to `prove` still counts
+toward the 2048-clause input limit, so a caller should preselect candidates.
+
 The receiver imports no search engine. The client requires Logos kernel, and
 the Archon adapter requires `@bitspark/archon@0.15.0`; both are optional peers.
 Custom authentication can implement the small callback instead. The adapter
