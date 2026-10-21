@@ -54,7 +54,9 @@ verify that exact query. It runs no search and makes no network or clock call.
 The client entry point uses Logos search to produce the derivation. Its
 clause-reference translation only maps Logos content identifiers to the
 existing law and bundle identifiers; it does not ground rules or derive rights.
-Authored variables and their bindings remain Logos's responsibility.
+Authored variables and their bindings remain Logos's responsibility. A search
+that returns no proof is reported as `exhausted` or `not_completed` with the
+Logos outcome attached; the client adds no reading of its own beyond that split.
 
 A rejected proof denies this request's evidence. It does not prove that no
 valid derivation exists. The positive body subset implemented here is
