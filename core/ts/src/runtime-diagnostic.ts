@@ -3,6 +3,7 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getHeapStatistics } from "node:v8";
+import type { PreparedViewFactory } from "@bitspark/logos-kernel";
 
 let sequence = 0;
 let activation = 0;
@@ -60,4 +61,23 @@ export function runtimePhase<T>(id: number, phase: string, operation: () => T): 
     runtimeCheckpoint(id, phase, "failed", "The runtime operation threw; its original exception is preserved");
     throw error;
   }
+}
+
+/** Entry occurs only after Session's isolation capture, without capturing another graph. */
+export function diagnosticFactory(id: number, factory: PreparedViewFactory): PreparedViewFactory {
+  return {
+    async prepare(input) {
+      runtimeCheckpoint(id, "factory-prepare", "start");
+      try {
+        // Invoke the actual receiver; the wrapper owns neither the input nor the
+        // returned runtime, and changes no close/publication responsibility.
+        const runtime = await factory.prepare(input);
+        runtimeCheckpoint(id, "factory-prepare", "complete");
+        return runtime;
+      } catch (error) {
+        runtimeCheckpoint(id, "factory-prepare", "failed", "Factory preparation threw; its original exception is preserved");
+        throw error;
+      }
+    },
+  };
 }

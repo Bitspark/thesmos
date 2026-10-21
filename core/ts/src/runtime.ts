@@ -20,7 +20,7 @@ import {
 } from "./runtime-source.js";
 export { instantiateSpacesObservations } from "./runtime-fragments.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
-import { beginRuntimeDiagnostic, runtimeCheckpoint, runtimePhase } from "./runtime-diagnostic.js";
+import { beginRuntimeDiagnostic, diagnosticFactory, runtimeCheckpoint, runtimePhase } from "./runtime-diagnostic.js";
 
 export {
   exportSpacesProof, portableEnvelopeReserve, PreparationRefused, prepareSpacesOverlay, prepareSpacesProgram, SpacesProgram,
@@ -200,7 +200,7 @@ export class SpacesRuntime {
     })();
     runtimeCheckpoint(diagnostic, "owner-prepare", "start");
     try {
-      const lease = await owner.prepare(factory);
+      const lease = await owner.prepare(diagnosticFactory(diagnostic, factory));
       runtimeCheckpoint(diagnostic, "owner-prepare", "complete");
       runtimeCheckpoint(diagnostic, "create", "complete");
       return new SpacesRuntime({ config: captured, owner, factory, profile, base, lease });
@@ -226,7 +226,7 @@ export class SpacesRuntime {
       const pending = (() => {
         const program = runtimePhase(diagnostic, "replacement-native-program-decode", () => Program.fromLookup(base.nativeProgram()));
         runtimeCheckpoint(diagnostic, "replacement-prepare", "start");
-        return state.owner.prepareReplacement(program, Bindings.empty().bind("root/1", [anchor]), state.factory);
+        return state.owner.prepareReplacement(program, Bindings.empty().bind("root/1", [anchor]), diagnosticFactory(diagnostic, state.factory));
       })();
       const ticket = await pending;
       runtimeCheckpoint(diagnostic, "replacement-prepare", "complete");
