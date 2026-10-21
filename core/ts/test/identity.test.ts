@@ -64,6 +64,18 @@ test("account actors use full variable and supplier proofs for two unrelated voc
   assert.equal(proofs.length, 2);
 });
 
+test("diagnostic: the same chain with operation-bounded conditional rules", async () => {
+  const verifier = createSpacesVerifier({ root, authenticate: authenticateArchon });
+  for (let i = 0; i < operations.length; i++) {
+    const query = { actor: carol, statement: operations[i]!, space: spaces[i]! };
+    const proof = await prove({ root, query, bundles: accountBundles({ operationBound: true }) }).catch(error => {
+      if (error instanceof ProofSearchError) console.error("Operation-bounded kernel outcome:", JSON.stringify(error.cause));
+      throw error;
+    });
+    assert.equal(verifier.verify({ query, proof }).permitted, true);
+  }
+});
+
 test("missing supplier, author or conditional support cannot establish the same account query", async () => {
   const query = { actor: carol, statement: operations[0]!, space: spaces[0]! };
   const verifier = createSpacesVerifier({ root, authenticate: authenticateArchon });
