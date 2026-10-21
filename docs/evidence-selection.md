@@ -5,7 +5,8 @@ checks authenticated `SpaceFactsBundle` values and complete native proofs. It
 does not acquire evidence or decide which historical outputs apply now.
 
 A receiver can configure an adapter that returns its selected bundles. The
-first Accounts integration uses this boundary internally. No public provider
+first Accounts integration uses this boundary internally with the qualified
+`v1.0.0-preview.2` archive. No public provider
 interface, revision field, paging protocol or expiry rule is required by the
 SDK. [Issue 7](https://github.com/Bitspark/thesmos/issues/7) retains that future
 interface work until a concrete interoperable caller needs it.
@@ -64,10 +65,12 @@ establish one atomic state across independent sources or validity at a later
 effect. The current consumer documents its observation cut and local effect
 fence; stronger guarantees require an operation-specific protocol.
 
-The current prover includes all supplied bundles. After one is deselected, a
-proof carrying it fails membership even if another route could justify the
-query. Reprove using the surviving selection. Proof pruning remains separate
-[issue 9](https://github.com/Bitspark/thesmos/issues/9).
+The released `v1.0.0-preview.2` prover includes all supplied bundles. After one
+is deselected, a proof carrying it fails membership even if another route could
+justify the query. Reprove using the surviving selection. Later source
+[PR17](https://github.com/Bitspark/thesmos/pull/17) prunes unused bundles on
+`main`, retaining used bundles whole and unchanged. That source change is not
+in the immutable preview.2 archive; consumer adoption needs a qualified release.
 
 Qualification pairs successful full native chains with removed author,
 supplier and conditional support; tests source replay, independent alternatives,

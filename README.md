@@ -63,7 +63,9 @@ engine failure, a request Logos refused, or Logos 0.23.0's fixed 256 MiB search
 memory, which no request field raises yet. Neither reason proves the operation
 is prohibited.
 
-A returned proof carries only the bundles its derivation uses, each unchanged.
+On `main` after preview.2, a returned proof carries only the bundles its
+derivation uses, each unchanged. The immutable preview.2 archive predates this
+change and carries all supplied bundles.
 Pruning works per bundle: a used bundle is disclosed in full, because it is
 signed as one payload. An asserter that needs finer disclosure, or wants a
 change to one record to leave other proofs intact, should keep records that
