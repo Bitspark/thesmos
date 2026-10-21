@@ -5,6 +5,14 @@ the reviewed runtime at `4ee59b39a287c4a8b69f4a66756f6332abadb638`. It must not 
 merged or published as a product change. The frozen law and authority adapter
 are unchanged.
 
+The next probe includes the separately reviewed encoded-source replacement from
+product commit `d8b98c478e0af9b853d09a373c1296f80ab75243` and its strengthened
+mutation control `70d778fbd8bb90029761ed79768d1f49be7053c3`. Only those product
+changes were cherry-picked into this diagnostic branch. Earlier probe artifacts
+continue to identify their earlier source; they are not measurements of this
+storage change. The instrumentation itself remains the reviewed observational
+checkpoint implementation.
+
 The explicit remote Nightyard `profile-current` route records checkpoints around
 configuration capture, authenticated source capture, defensive native program
 decoding, `Session.open`, factory creation and asynchronous preparation. It also
