@@ -1,0 +1,21 @@
+# Temporary cold runtime diagnostic
+
+The `runtime-cold-phase-diagnostic` branch is an auxiliary diagnostic, based on
+the reviewed runtime at `4ee59b39a287c4a8b69f4a66756f6332abadb638`. It must not be
+merged or published as a product change. The frozen law and authority adapter
+are unchanged.
+
+The explicit remote Nightyard `profile-current` route records checkpoints around
+configuration capture, authenticated source capture, defensive native program
+decoding, `Session.open`, factory creation and asynchronous preparation. It also
+records replacement phases if execution reaches them. Records identify the exact
+Logos and Thesmos source pins, build receipt and run, together with process memory,
+peak RSS, CPU use and actual V8 heap limit. A separate supervisor retains the file
+when V8 aborts before an operation can write its closing checkpoint.
+
+No heap setting or runtime budget changes. No source graph escapes, source is
+not pre-evaluated, and the caller's authority decision still uses the ordinary
+runtime. Checkpoint writes add diagnostic overhead; these intervals are not
+production latency measurements or qualification evidence. The next artifact
+must report its own source pins, rather than being labelled as the previous
+uninstrumented runtime.

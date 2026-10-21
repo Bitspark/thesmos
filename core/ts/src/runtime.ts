@@ -20,6 +20,7 @@ import {
 } from "./runtime-source.js";
 export { instantiateSpacesObservations } from "./runtime-fragments.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
+import { beginRuntimeDiagnostic, runtimeCheckpoint, runtimePhase } from "./runtime-diagnostic.js";
 
 export {
   exportSpacesProof, portableEnvelopeReserve, PreparationRefused, prepareSpacesOverlay, prepareSpacesProgram, SpacesProgram,
@@ -168,11 +169,15 @@ export class SpacesRuntime {
   }
 
   static async open(config: SpacesRuntimeConfig): Promise<SpacesRuntime> {
+    const diagnostic = beginRuntimeDiagnostic("create");
+    runtimeCheckpoint(diagnostic, "config-capture", "start");
     config = { ...config, root: copyValue(config.root),
       preparationBudget: Object.freeze({ ...config.preparationBudget }),
       observationTemplates: (config.observationTemplates ?? []).map(template => ({ ...template,
         clause: copyClause(template.clause), parameters: [...template.parameters] })) };
-    const base = prepareSpacesProgram({ bundles: config.bundles, authenticate: config.authenticate, budget: config.preparationBudget });
+    runtimeCheckpoint(diagnostic, "config-capture", "complete");
+    const base = runtimePhase(diagnostic, "source-capture", () => prepareSpacesProgram({
+      bundles: config.bundles, authenticate: config.authenticate, budget: config.preparationBudget }));
     const anchor = inputLiteral(fact("root", config.root));
     const profile: CheckProfile<undefined> = {
       theory: new TermTheory(),
@@ -184,11 +189,25 @@ export class SpacesRuntime {
       memoryLimitPages: config.memoryLimitPages, preparationBudget: Object.freeze({ ...config.preparationBudget }),
       observationTemplates: Object.freeze((config.observationTemplates ?? []).map(t => Object.freeze({ ...t, parameters: Object.freeze([...t.parameters]) }))),
       limits: config.limits && Object.freeze({ ...config.limits }) };
-    const factory = WasmPreparedFactory.create({ checkProfile: profile, ctx: undefined, memoryLimitPages: config.memoryLimitPages,
-      templates: captured.observationTemplates, limits: captured.limits });
-    const owner = Session.open(Program.fromLookup(base.nativeProgram()), Bindings.empty().bind("root/1", [anchor]), Multiplicity.Set);
-    try { return new SpacesRuntime({ config: captured, owner, factory, profile, base, lease: await owner.prepare(factory) }); }
-    catch (error) { owner.close(); throw error; }
+    const factory = runtimePhase(diagnostic, "factory-create", () => WasmPreparedFactory.create({
+      checkProfile: profile, ctx: undefined, memoryLimitPages: config.memoryLimitPages,
+      templates: captured.observationTemplates, limits: captured.limits }));
+    // The defensive decoded graph has the same operation lifetime as the former
+    // inline Session.open argument; no diagnostic callback retains it afterwards.
+    const owner = (() => {
+      const program = runtimePhase(diagnostic, "native-program-decode", () => Program.fromLookup(base.nativeProgram()));
+      return runtimePhase(diagnostic, "session-open", () => Session.open(program, Bindings.empty().bind("root/1", [anchor]), Multiplicity.Set));
+    })();
+    runtimeCheckpoint(diagnostic, "owner-prepare", "start");
+    try {
+      const lease = await owner.prepare(factory);
+      runtimeCheckpoint(diagnostic, "owner-prepare", "complete");
+      runtimeCheckpoint(diagnostic, "create", "complete");
+      return new SpacesRuntime({ config: captured, owner, factory, profile, base, lease });
+    } catch (error) {
+      runtimeCheckpoint(diagnostic, "owner-prepare", "failed", error instanceof Error ? error.message : String(error));
+      owner.close(); throw error;
+    }
   }
 
   get baseIdentity(): string { return this.#baseIdentity; }
@@ -199,10 +218,18 @@ export class SpacesRuntime {
     const state = this.#live();
     if (this.#replacing) throw new PreparedSessionError("replacement_in_progress");
     this.#replacing = true;
+    const diagnostic = beginRuntimeDiagnostic("replace");
     try {
-      const base = prepareSpacesProgram({ bundles, authenticate: state.config.authenticate, budget: state.config.preparationBudget });
+      const base = runtimePhase(diagnostic, "replacement-source-capture", () => prepareSpacesProgram({
+        bundles, authenticate: state.config.authenticate, budget: state.config.preparationBudget }));
       const anchor = inputLiteral(fact("root", state.config.root));
-      const ticket = await state.owner.prepareReplacement(Program.fromLookup(base.nativeProgram()), Bindings.empty().bind("root/1", [anchor]), state.factory);
+      const pending = (() => {
+        const program = runtimePhase(diagnostic, "replacement-native-program-decode", () => Program.fromLookup(base.nativeProgram()));
+        runtimeCheckpoint(diagnostic, "replacement-prepare", "start");
+        return state.owner.prepareReplacement(program, Bindings.empty().bind("root/1", [anchor]), state.factory);
+      })();
+      const ticket = await pending;
+      runtimeCheckpoint(diagnostic, "replacement-prepare", "complete");
       try {
         if (this.#state !== state) throw new PreparedSessionError("runtime_closed");
         state.owner.publish(ticket);
@@ -210,6 +237,7 @@ export class SpacesRuntime {
       const lease = state.owner.pin(), previous = state.lease;
       state.base = base; state.lease = lease; this.#baseIdentity = base.identity;
       previous.close();
+      runtimeCheckpoint(diagnostic, "replace", "complete");
     } finally { this.#replacing = false; }
   }
 
