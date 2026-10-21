@@ -77,7 +77,7 @@ Measured envelope (`core/ts/test/shapes.test.ts`, on a development workstation):
 | A workload acting for a person via a membership rule, a confirmation and a delegated asserter's workload fact (three suppliers, two variable rules) | about 0.6 s | about 0.1 s | 28 KB | 62 / 11 |
 | The same request nested inside a run start whose rule binds the inner actor | about 0.7 s | about 0.1 s | 38 KB | 77 / 13 |
 
-These are far inside the verifier's limits (2048 nodes, depth 256, 1 MiB). A nested rule that leaves the inner request's actor unbound (`authorized(W, Inner, S)` with `W` free) did not complete: after about 36 s Logos returned `not_completed`. Bind the actor through the inner request's own terms.
+These are far inside the verifier's limits (2048 nodes, depth 256, 1 MiB). A nested rule that leaves the inner request's actor unbound (`authorized(W, Inner, S)` with `W` free) did not complete in a one-off observation: after about 36 s Logos returned `not_completed` (not pinned by a test). Bind the actor through the inner request's own terms.
 
 The receiver imports no search engine. The client requires Logos kernel, and
 the Archon adapter requires `@bitspark/archon@0.15.0`; both are optional peers.

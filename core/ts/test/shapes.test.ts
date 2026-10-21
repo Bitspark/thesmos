@@ -25,7 +25,7 @@ async function rules(source: string): Promise<readonly Clause[]> {
   return (await loadSearcher()).parseProgram(source).clauses;
 }
 
-async function shapeBundles(nested: boolean) {
+async function shapeBundles(nested: boolean, drop: "confirmation" | "workload" | null = null) {
   const [aliceDeploy, aliceExecute, aliceStart, mayaMember, acConfirm, noWorkload] = await rules(`
     authorized(alice, deploy(payments, A, C, R), [org, p7, runtime]).
     authorized(alice, execute_for(P, W, Op, Req, Aud), [org, p7, runtime]).
@@ -60,10 +60,10 @@ async function shapeBundles(nested: boolean) {
       attributedClause(atom("alice"), project, executeRule!),
       ...(nested ? [attributedClause(atom("alice"), project, startRule!)] : []),
       attributedClause(atom("maya"), project, bobMember!),
-      attributedClause(atom("ac"), project, bobConfirmed!),
+      ...(drop === "confirmation" ? [] : [attributedClause(atom("ac"), project, bobConfirmed!)]),
     ] }, seed(42)),
     signSpaceFacts({ supplier: child, space: runtime, assertedAt: time, clauses: [
-      attributedClause(atom("no"), runtime, deskWorkload!),
+      ...(drop === "workload" ? [] : [attributedClause(atom("no"), runtime, deskWorkload!)]),
       ...(nested ? [attributedClause(atom("no"), runtime, runnerWorkload!)] : []),
     ] }, seed(43)),
   ];
@@ -87,11 +87,17 @@ async function measure(query: { actor: Value; statement: Value; space: Value }, 
   const decision = createSpacesVerifier({ root, authenticate: authenticateArchon }).verify({ query, proof });
   const checkMs = performance.now() - checkStarted;
   const derivation = decodeProof(proof).derivation;
-  return { decision, searchMs, checkMs, bytes: proof.byteLength, nodes: derivation.nodes.length, depth: depth(derivation) };
+  return { proof, decision, searchMs, checkMs, bytes: proof.byteLength, nodes: derivation.nodes.length, depth: depth(derivation) };
 }
 
-// The margin below the protocol limits this shape must stay within (half of each bound).
+// The margin below the protocol limits these shapes must stay within (half of each bound).
 const limits = protocol.limits, margin = 0.5;
+const exhaustedSearch = (error: unknown) => error instanceof ProofSearchError && error.reason === "exhausted";
+function withinMargin(m: { bytes: number; nodes: number; depth: number }) {
+  assert.ok(m.bytes <= limits.maxProofBytes * margin, `proof bytes ${m.bytes}`);
+  assert.ok(m.nodes <= limits.maxProofSteps * margin, `proof nodes ${m.nodes}`);
+  assert.ok(m.depth <= limits.maxProofDepth * margin, `proof depth ${m.depth}`);
+}
 
 test("a delegated-execution proof stays well inside search memory and the verifier's limits", async () => {
   const query = { actor: atom("w"), statement: execute("w", deploy), space: runtime };
@@ -99,14 +105,16 @@ test("a delegated-execution proof stays well inside search memory and the verifi
   console.log(`delegated execution: search ${m.searchMs.toFixed(0)} ms, check ${m.checkMs.toFixed(0)} ms, ` +
     `${m.bytes} bytes, ${m.nodes} nodes, depth ${m.depth}`);
   assert.equal(m.decision.permitted, true, m.decision.detail);
-  assert.ok(m.bytes <= limits.maxProofBytes * margin, `proof bytes ${m.bytes}`);
-  assert.ok(m.nodes <= limits.maxProofSteps * margin, `proof nodes ${m.nodes}`);
-  assert.ok(m.depth <= limits.maxProofDepth * margin, `proof depth ${m.depth}`);
-  // The same evidence does not authorize a changed operation or another workload.
-  const verifier = createSpacesVerifier({ root, authenticate: authenticateArchon });
-  const proof = await prove({ root, query, bundles: await shapeBundles(false) });
-  assert.equal(verifier.verify({ query: { ...query, statement: execute("w", fact("deploy", atom("payments"), atom("a92"), atom("c7"), atom("r18"))) }, proof }).permitted, false);
-  assert.equal(verifier.verify({ query: { ...query, actor: atom("w2"), statement: execute("w2", deploy) }, proof }).permitted, false);
+  withinMargin(m);
+  // Each premise of the route is required: without the confirmation or the workload fact, the
+  // completed search finds no proof.
+  for (const drop of ["confirmation", "workload"] as const) {
+    await assert.rejects(prove({ root, query, bundles: await shapeBundles(false, drop) }), exhaustedSearch, drop);
+  }
+  // The proof does not carry over to a changed operation.
+  const changed = execute("w", fact("deploy", atom("payments"), atom("a92"), atom("c7"), atom("r18")));
+  assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon })
+    .verify({ query: { ...query, statement: changed }, proof: m.proof }).permitted, false);
 });
 
 // A counted grant confers only when its placement prefixes the grant's UNDERLYING space. A grant to
@@ -115,25 +123,22 @@ test("a delegated-execution proof stays well inside search memory and the verifi
 test("a grant placed below its underlying space confers nothing, even where both paths prefix the target", async () => {
   const p = path("p"), alice = atom("alice"), read = atom("read");
   const query = { actor: alice, statement: read, space: p };
-  const grantAt = (placement: Value) => [signSpaceFacts({ supplier: root, space: placement, assertedAt: time,
-    clauses: [attributedClause(root, placement, authorization(alice, read, path()))] }, seed(41))];
-  await assert.rejects(prove({ root, query, bundles: grantAt(p) }),
-    (error: unknown) => error instanceof ProofSearchError && error.reason === "exhausted");
-  const control = await prove({ root, query, bundles: grantAt(path()) });
-  assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon }).verify({ query, proof: control }).permitted, true);
+  const grant = (to: Value, placement: Value) => [signSpaceFacts({ supplier: root, space: placement, assertedAt: time,
+    clauses: [attributedClause(root, placement, authorization(alice, read, to))] }, seed(41))];
+  await assert.rejects(prove({ root, query, bundles: grant(path(), p) }), exhaustedSearch);
+  await assert.rejects(prove({ root, query, bundles: grant(path(), path("p", "q")) }), exhaustedSearch);
+  const verifier = createSpacesVerifier({ root, authenticate: authenticateArchon });
+  for (const [to, placement] of [[path(), path()], [p, p]] as const) {
+    assert.equal(verifier.verify({ query, proof: await prove({ root, query, bundles: grant(to, placement) }) }).permitted, true);
+  }
 });
 
-test("one more level of nesting either proves within the limits or reports an incomplete search", async () => {
+// A run start whose rule binds the inner request's actor through the request's own terms.
+test("the same request nested inside a run start still proves within the margin", async () => {
   const query = { actor: atom("r1"), statement: fact("start", atom("r1"), execute("w", deploy)), space: runtime };
-  try {
-    const m = await measure(query, true);
-    console.log(`nested start: search ${m.searchMs.toFixed(0)} ms, check ${m.checkMs.toFixed(0)} ms, ` +
-      `${m.bytes} bytes, ${m.nodes} nodes, depth ${m.depth}`);
-    assert.equal(m.decision.permitted, true, m.decision.detail);
-    assert.ok(m.nodes <= limits.maxProofSteps && m.bytes <= limits.maxProofBytes && m.depth <= limits.maxProofDepth);
-  } catch (error) {
-    // A proof exists, so "exhausted" would be a wrong answer; only an incomplete search is acceptable.
-    assert.ok(error instanceof ProofSearchError && error.reason === "not_completed", String(error));
-    console.log(`nested start: search not completed: ${JSON.stringify(error.cause, (_, v) => typeof v === "bigint" ? String(v) : v).slice(0, 400)}`);
-  }
+  const m = await measure(query, true);
+  console.log(`nested start: search ${m.searchMs.toFixed(0)} ms, check ${m.checkMs.toFixed(0)} ms, ` +
+    `${m.bytes} bytes, ${m.nodes} nodes, depth ${m.depth}`);
+  assert.equal(m.decision.permitted, true, m.decision.detail);
+  withinMargin(m);
 });
