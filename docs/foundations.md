@@ -19,7 +19,7 @@ An application selecting Deixis keys can represent them directly as atoms.
 The public family separates semantic floors, codecs, optional adapters and
 language bindings. This repository follows that separation with one actual
 TypeScript implementation, rather than placeholder packages for other languages.
-Ontos 0.13.0 is pinned to match the selected Logos 0.23.0 dependency cohort;
+Ontos 0.13.0 is pinned to match the selected Logos 0.24.0 dependency cohort;
 the inspected Ontos main reports 0.14.0. Upgrading one side alone can produce
 incompatible JavaScript class identities even when the value semantics agree.
 

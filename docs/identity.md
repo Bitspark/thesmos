@@ -75,10 +75,10 @@ integration. Receivers select applicable bundles through their own policy
 before using the local proof checker.
 
 The separate wide-operation witness also leaves the operation itself as an
-unconstrained variable. On Logos 0.23.0 it reaches the declared 256 MiB host
+unconstrained variable. At the default 256 MiB guest memory it reaches the host
 search limit even for this small program. The suite preserves that witness:
 it must either produce a valid proof or report that precise capacity stop,
 never infer prohibition. The runnable concrete-operation profile must produce
 proofs for both vocabularies and pass all missing-support checks. This is a
 measured search limitation, not a restriction on the law or authored syntax;
-see [the embedding capacity issue](https://github.com/Bitspark/logos/issues/3807).
+`prove`'s `memoryLimitPages` option (Logos 0.24.0) raises the ceiling to at most 1 GiB.

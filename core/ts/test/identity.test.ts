@@ -91,7 +91,7 @@ test("a wide-operation policy certifies or reports the precise documented host-c
     assert.equal(failure.scope, "host");
     assert.equal(new TextDecoder().decode(failure.component), "wasm");
     assert.equal(new TextDecoder().decode(failure.capability), "memory");
-    t.diagnostic("The unconstrained operation variable reached the Logos 0.23 host-memory ceiling; no authority denial was inferred.");
+    t.diagnostic("The unconstrained operation variable reached the default 256 MiB host-memory ceiling; no authority denial was inferred.");
     return;
   }
   assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon }).verify({ query, proof }).permitted, true);

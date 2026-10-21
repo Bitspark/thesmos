@@ -12,12 +12,14 @@ export interface ProveRequest {
   readonly root: Value;
   readonly query: Query;
   readonly bundles: readonly SpaceFactsBundle[];
-  /**
-   * Logos's search budget. Memory is not among its bounds: Logos 0.23.0 runs the search in a
-   * WebAssembly guest capped at 256 MiB, and `embedQuery` has no option to raise it (logos#3807).
-   * A search that outgrows it fails as `not_completed`.
-   */
+  /** Logos's search budget, including `memoryBytes`, the guest's live-allocation budget. */
   readonly limits?: EmbedRequest["limits"];
+  /**
+   * The search guest's memory ceiling in 64 KiB pages: 4096 (256 MiB) when unset, at most 16384
+   * (1 GiB). A search that outgrows it fails as `not_completed`. A value outside 1..16384 makes
+   * Logos throw a `RangeError` before any search, not a `ProofSearchError`.
+   */
+  readonly memoryLimitPages?: EmbedRequest["memoryLimitPages"];
 }
 
 /**
@@ -44,7 +46,7 @@ export async function prove(request: ProveRequest, signal?: AbortSignal): Promis
   const query = inputLiteral(authorization(request.query.actor, request.query.statement, request.query.space));
   const outcome = await embedQuery({
     rules: program.entries().map(([, clause]) => clause),
-    facts: [anchor], goal: query.toGoal(), limits: request.limits,
+    facts: [anchor], goal: query.toGoal(), limits: request.limits, memoryLimitPages: request.memoryLimitPages,
   }, signal);
   if (outcome.kind !== "certified") throw new ProofSearchError("not_completed", outcome);
   const result = outcome.outcome;

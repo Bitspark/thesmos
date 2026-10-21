@@ -11,8 +11,8 @@ This repository contains none of its history or runtime compatibility paths.
 
 Source preview, Node 24. The checker, asserter layer, optional Archon adapter
 and Logos proof client are implemented. **An anonymous npm install is not yet
-available:** the required `@bitspark/logos-contract@0.23.0` and optional client
-dependency `@bitspark/logos-kernel@0.23.0` are currently private GitHub packages.
+available:** the required `@bitspark/logos-contract@0.24.0` and optional client
+dependency `@bitspark/logos-kernel@0.24.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
 The [v1.0.0-preview.2 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.2)
@@ -32,7 +32,7 @@ npm run check
 
 Keep the existing credential in the normal user or CI secret store. Do not add
 credentials to this repository. The lockfile selects exact Logos artifacts;
-Ontos stays on 0.13.0 to share the same Value implementation as Logos 0.23.0.
+Ontos stays on 0.13.0 to share the same Value implementation as Logos 0.24.0.
 
 ## Receiver and caller
 
@@ -59,8 +59,10 @@ const proof = await prove({ root: configuredRoot, query, bundles });
 When no proof is returned, `prove` throws a `ProofSearchError`. Its `reason` is
 `exhausted` when the search finished without deriving the query, and
 `not_completed` for any other outcome: a `limits` bound, cancellation, an
-engine failure, a request Logos refused, or Logos 0.23.0's fixed 256 MiB search
-memory, which no request field raises yet. Neither reason proves the operation
+engine failure, a request Logos refused, or the search memory ceiling. That
+ceiling is 256 MiB by default; `memoryLimitPages` raises it to at most 1 GiB
+(16384 pages); a value outside that range throws a `RangeError` from Logos rather
+than a `ProofSearchError`. Neither reason proves the operation
 is prohibited.
 
 On `main` after preview.2, a returned proof carries only the bundles its
