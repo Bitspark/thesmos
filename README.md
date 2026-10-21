@@ -57,9 +57,10 @@ const proof = await prove({ root: configuredRoot, query, bundles });
 
 When no proof is returned, `prove` throws a `ProofSearchError`. Its `reason` is
 `exhausted` when the search finished without deriving the query, and
-`not_completed` when it stopped first: at a `limits` bound, on cancellation, or
-at Logos 0.23.0's fixed 256 MiB search memory, which no request field raises
-yet. Neither reason proves the operation is prohibited.
+`not_completed` for any other outcome: a `limits` bound, cancellation, an
+engine failure, a request Logos refused, or Logos 0.23.0's fixed 256 MiB search
+memory, which no request field raises yet. Neither reason proves the operation
+is prohibited.
 
 The receiver imports no search engine. The client requires Logos kernel, and
 the Archon adapter requires `@bitspark/archon@0.15.0`; both are optional peers.

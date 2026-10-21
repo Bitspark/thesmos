@@ -14,7 +14,7 @@ export interface ProveRequest {
   readonly bundles: readonly SpaceFactsBundle[];
   /**
    * Logos's search budget. Memory is not among its bounds: Logos 0.23.0 runs the search in a
-   * WebAssembly guest capped at 256 MiB, and `embedQuery` has no option to raise it (logos#3592).
+   * WebAssembly guest capped at 256 MiB, and `embedQuery` has no option to raise it (logos#3807).
    * A search that outgrows it fails as `not_completed`.
    */
   readonly limits?: EmbedRequest["limits"];
@@ -22,17 +22,18 @@ export interface ProveRequest {
 
 /**
  * Why `prove` returned no proof. `exhausted`: the certified search drained its answer stream
- * without deriving the query from these bundles. `not_completed`: the search stopped first, at a
- * limit, cancellation, the memory ceiling or an engine failure, so a proof may still exist.
- * Neither is a proof of prohibition.
+ * without deriving the query from these bundles. `not_completed`: any other outcome, such as a
+ * limit, cancellation, the memory ceiling, an engine failure or a request Logos refused, so the
+ * search established nothing. Neither is a proof of prohibition.
  */
 export type ProofSearchFailure = "exhausted" | "not_completed";
 
 /** The failure `prove` throws when it returns no proof. `cause` is the Logos outcome unchanged. */
 export class ProofSearchError extends Error {
-  override readonly name = "ProofSearchError";
-  constructor(readonly reason: ProofSearchFailure, override readonly cause: KernelOutcome) {
-    super(reason === "exhausted" ? "No proof was found" : "Logos could not complete the proof search", { cause });
+  declare readonly cause: KernelOutcome;
+  static { this.prototype.name = "ProofSearchError"; }
+  constructor(readonly reason: ProofSearchFailure, outcome: KernelOutcome) {
+    super(reason === "exhausted" ? "No proof was found" : "Logos could not complete the proof search", { cause: outcome });
   }
 }
 

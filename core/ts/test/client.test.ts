@@ -13,7 +13,8 @@ import { authenticateArchon, signSpaceFacts } from "../src/archon.js";
 import { bob, documentBundles, root, runDocumentExample, space, statement } from "../../../examples/document-service.js";
 
 const failsAs = (reason: ProofSearchFailure) => (error: unknown) =>
-  error instanceof ProofSearchError && error.reason === reason;
+  error instanceof ProofSearchError && error.reason === reason && error.name === "ProofSearchError"
+    && error.cause.kind !== undefined && !Object.keys(error).includes("cause");
 
 test("native Logos search constructs the complete document proof", async () => {
   const { proof, query } = await runDocumentExample();
