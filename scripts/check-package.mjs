@@ -19,7 +19,16 @@ assert(pack.files.every(file => !/node_modules|test\/|examples\/|\.git\//.test(f
 // The lockfile's dependency URLs preserve the selected private Logos artifacts.
 // Use an independent package installation, not workspace imports.
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
-const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+const lockBytes = readFileSync("package-lock.json");
+assert.deepEqual(lockBytes, execFileSync("git", ["show", "HEAD:package-lock.json"]), "The packed check requires the committed dependency lock");
+const lock = JSON.parse(lockBytes);
+const publishedDependencies = {
+  lockSha256: createHash("sha256").update(lockBytes).digest("hex"),
+  packages: Object.fromEntries(Object.entries(lock.packages).filter(([name]) => name).map(([name, entry]) => {
+    assert(entry.version && entry.resolved && entry.integrity && !entry.link, `Dependency ${name} lacks an immutable published resolution`);
+    return [name, { version: entry.version, resolved: entry.resolved, integrity: entry.integrity }];
+  })),
+};
 const consumer = { ...manifest, name: "thesmos-packed-consumer", private: true, scripts: {}, exports: undefined };
 lock.name = consumer.name;
 lock.packages[""].name = consumer.name;
@@ -30,8 +39,12 @@ npm(["install", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-aud
 // A downstream source-candidate gate supplies the two archives built from its
 // recorded Logos revision. This remains an independent packed installation.
 const candidate = [process.env.THESMOS_CANDIDATE_LOGOS_CONTRACT, process.env.THESMOS_CANDIDATE_LOGOS_KERNEL];
+let testedDependencies = { kind: "published", ...publishedDependencies };
 if (candidate.some(Boolean)) {
   assert(candidate.every(Boolean) && /^[a-f0-9]{40}$/.test(process.env.LOGOS_REVISION ?? ""), "Candidate packages require an exact paired source pin");
+  testedDependencies = { kind: "candidate", logosSource: process.env.LOGOS_REVISION, baseline: publishedDependencies,
+    packages: Object.fromEntries(["@bitspark/logos-contract", "@bitspark/logos-kernel"].map((name, index) =>
+      [name, { sha256: createHash("sha256").update(readFileSync(candidate[index])).digest("hex") }])) };
   npm(["install", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit", "--no-save", ...candidate], directory);
 }
 writeFileSync(join(directory, "check.mjs"), `
@@ -109,6 +122,6 @@ writeFileSync(join(".build-artifacts", "release-artifact.json"), JSON.stringify(
   run: process.env.GITHUB_RUN_ID ?? null, node: process.version, packedConsumer: "passed",
   package: { name: manifest.name, version: manifest.version, filename: pack.filename,
     bytes: readFileSync(join(directory, pack.filename)).byteLength, sha256: archiveSha256, integrity: pack.integrity },
-  dependencies: manifest.dependencies, peerDependencies: manifest.peerDependencies,
+  dependencies: manifest.dependencies, peerDependencies: manifest.peerDependencies, testedDependencies,
 }, null, 2) + "\n");
 console.log(`Package inspected: ${pack.filename} (${pack.files.length} files). Temporary consumer: ${directory}`);

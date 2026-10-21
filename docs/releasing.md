@@ -20,6 +20,11 @@ After merging, require the complete check on the exact target commit. Its
 `release-artifact.json`. Verify the archive digest, manifest version, source commit
 and successful workflow before publishing that same archive in an immutable
 `v<package-version>` GitHub prerelease. Do not rebuild it during publication.
+The receipt must identify `testedDependencies.kind` as `published`, with the
+committed lock digest and resolved package integrity entries. A receipt with
+`kind: candidate` binds the paired override archives and logos source instead;
+it is source qualification evidence and cannot qualify the declared released
+dependencies for publication.
 
 Release notes record the checks, dependency access requirement, frozen-law
 identity and any measured limits. A runtime release is distinct from the
