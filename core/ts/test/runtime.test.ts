@@ -6,7 +6,7 @@ import { decode, encode } from "@bitspark/ontos-codec";
 import { encodeInt } from "@bitspark/ontos-data";
 import { atom, authorization, attributedClause, createSpacesVerifier, decodeProof, fact, path } from "../src/index.js";
 import { authenticateArchon, signSpaceFacts } from "../src/archon.js";
-import { createSpacesRuntime, instantiateSpacesObservations, portableEnvelopeReserve, prepareSpacesOverlay, prepareSpacesProgram, PreparationRefused } from "../src/runtime.js";
+import { createSpacesRuntime, instantiateSpacesObservations, portableEnvelopeReserve, prepareSpacesOverlay, prepareSpacesProgram, PreparationRefused, SpacesWitness } from "../src/runtime.js";
 import { lawDigest, layerDigest, protocol } from "../src/data.js";
 import { ProofBuilder } from "./recipes.js";
 
@@ -175,5 +175,19 @@ test("root, query and declared fragment byte mutation cannot rewrite a prepared 
       if (exported.kind === "exported") assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon })
         .verify({ query: query("captured"), proof: exported.proof }).permitted, true);
     } finally { result.witness.close(); }
+  } finally { runtime.close(); }
+});
+
+test("a rejected required export releases its detached witness", async t => {
+  const failure = new Error("synthetic retained materialization failure");
+  const close = SpacesWitness.prototype.close;
+  let closed = 0;
+  t.mock.method(SpacesWitness.prototype, "export", async () => { throw failure; });
+  t.mock.method(SpacesWitness.prototype, "close", function (this: SpacesWitness) { closed++; close.call(this); });
+  const runtime = await createSpacesRuntime({ root, bundles: [], authenticate: authenticateArchon, preparationBudget: budget });
+  try {
+    await assert.rejects(runtime.decide({ query: { actor: root, statement: atom("synthetic-action"), space: service },
+      observations: [], portable: "required" }), error => error === failure);
+    assert.equal(closed, 1);
   } finally { runtime.close(); }
 });

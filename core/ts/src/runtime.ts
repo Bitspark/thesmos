@@ -193,7 +193,9 @@ export class SpacesRuntime {
       for (const extra of result.witnesses.slice(1)) extra.close();
       const witness = new SpacesWitness(snapshot, retained, this.config.root, query, [base, overlay], this.config.authenticate);
       if (required) {
-        const exported = await witness.export(carryingBudget);
+        let exported: SpacesExport;
+        try { exported = await witness.export(carryingBudget); }
+        catch (error) { witness.close(); throw error; }
         if (exported.kind !== "exported") { witness.close(); return { kind: "unsupported", detail: `${exported.reason}: ${exported.detail}`, outcome: result.outcome }; }
         return { kind: "permitted", snapshot, outcome: result.outcome, witness, proof: exported.proof };
       }
