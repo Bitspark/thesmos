@@ -57,7 +57,11 @@ test("record inspection reuses clause syntax checks and preserves variables with
 });
 
 test("account actors use full variable and supplier proofs for two unrelated vocabularies", async () => {
-  assert.equal((await runAccountExample()).length, 2);
+  const proofs = await runAccountExample().catch(error => {
+    if (error instanceof ProofSearchError) console.error("Account proof kernel outcome:", JSON.stringify(error.cause));
+    throw error;
+  });
+  assert.equal(proofs.length, 2);
 });
 
 test("missing supplier, author or conditional support cannot establish the same account query", async () => {
