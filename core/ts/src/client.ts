@@ -16,7 +16,8 @@ export interface ProveRequest {
   readonly limits?: EmbedRequest["limits"];
   /**
    * The search guest's memory ceiling in 64 KiB pages: 4096 (256 MiB) when unset, at most 16384
-   * (1 GiB). A search that outgrows it fails as `not_completed`; Logos rejects invalid values.
+   * (1 GiB). A search that outgrows it fails as `not_completed`. A value outside 1..16384 makes
+   * Logos throw a `RangeError` before any search, not a `ProofSearchError`.
    */
   readonly memoryLimitPages?: EmbedRequest["memoryLimitPages"];
 }

@@ -105,9 +105,20 @@ test("valid signatures cannot bootstrap a self-appointed supplier", async () => 
   await assert.rejects(prove({ root, query, bundles }), failsAs("exhausted"));
 });
 
-test("the search memory ceiling reaches Logos: one page cannot hold the search", async () => {
+test("the search memory ceiling and budget reach Logos", async () => {
   const query = { actor: bob, space, statement };
-  await assert.rejects(prove({ root, query, bundles: documentBundles(), memoryLimitPages: 1 }), failsAs("not_completed"));
+  // One page cannot hold the search guest: the stop names the host memory capability.
+  await assert.rejects(prove({ root, query, bundles: documentBundles(), memoryLimitPages: 1 }), (error: unknown) => {
+    if (!failsAs("not_completed")(error)) return false;
+    const outcome = (error as ProofSearchError).cause;
+    if (outcome.kind !== "not_completed") return false;
+    const failure = (outcome.cause as { failureCause?: { kind: string; capability?: Uint8Array } }).failureCause;
+    return failure?.kind === "capability_unavailable" && new TextDecoder().decode(failure.capability) === "memory";
+  });
+  // A one-byte live-allocation budget stops the run as a limit, also not_completed.
+  await assert.rejects(prove({ root, query, bundles: documentBundles(),
+    limits: { ...RunLimits.default(), memoryBytes: 1 } }), failsAs("not_completed"));
+  // The maximum ceiling is accepted (this search also fits under the default).
   const proof = await prove({ root, query, bundles: documentBundles(), memoryLimitPages: 16384 });
   assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon }).verify({ query, proof }).permitted, true);
 });

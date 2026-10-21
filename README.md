@@ -61,7 +61,8 @@ When no proof is returned, `prove` throws a `ProofSearchError`. Its `reason` is
 `not_completed` for any other outcome: a `limits` bound, cancellation, an
 engine failure, a request Logos refused, or the search memory ceiling. That
 ceiling is 256 MiB by default; `memoryLimitPages` raises it to at most 1 GiB
-(16384 pages). Neither reason proves the operation
+(16384 pages); a value outside that range throws a `RangeError` from Logos rather
+than a `ProofSearchError`. Neither reason proves the operation
 is prohibited.
 
 On `main` after preview.2, a returned proof carries only the bundles its
