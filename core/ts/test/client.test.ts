@@ -78,7 +78,7 @@ test("a proof carries only the bundles its derivation uses, each byte for byte",
   assert.equal(verifier.verify({ query, proof }).permitted, true);
   // References are renumbered with the bundles: restoring an unused bundle in front breaks them.
   const shifted = encodeProof({ ...decoded, bundles: [unused("first"), ...decoded.bundles] });
-  assert.equal(verifier.verify({ query, proof: shifted }).permitted, false);
+  assert.equal(verifier.verify({ query, proof: shifted }).code, "proof-rejected");
 });
 
 test("an ancestor can supply child facts directly and delegation retains its right", async () => {
