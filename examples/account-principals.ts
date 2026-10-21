@@ -37,14 +37,20 @@ export interface AccountEvidenceOptions {
   readonly aliceAuthor?: Value;
   /** False is the separate wide-operation search-capacity witness. */
   readonly operationBound?: boolean;
+  readonly variableTitle?: boolean;
 }
 
 export function accountBundles(options: AccountEvidenceOptions = {}): readonly SpaceFactsBundle[] {
   const at = (author: Value, input: Value | Clause) => attributedClause(author, team, input);
+  const operationTerm = (op: Value) => options.variableTitle && op.equals(operations[0]!)
+    ? Term.tuple([Term.fromValue(atom("title")), Term.var("Title")]) : Term.fromValue(op);
+  const grant = (recipient: Value, op: Value): Value | Clause => options.variableTitle
+    ? new Clause(Goal.of("authorized", [Term.fromValue(recipient), operationTerm(op), Term.fromValue(team)]), [])
+    : authorization(recipient, op, team);
   return [
     signSpaceFacts({ supplier: root, space: path(), assertedAt: time, clauses: [
       attributedClause(root, path(), authorization(grantor, supply, team)),
-      ...operations.map(op => attributedClause(root, path(), authorization(grantor, op, team))),
+      ...operations.map(op => attributedClause(root, path(), grant(grantor, op))),
       attributedClause(root, path(), authorization(observer, supply, team)),
       attributedClause(root, path(), authorization(observer, fact("eligible", carol), team)),
     ] }, seed(21)),
@@ -52,13 +58,13 @@ export function accountBundles(options: AccountEvidenceOptions = {}): readonly S
       options.omit === "supplier" ? [] : [at(grantor, authorization(accounts, supply, team))],
     }, seed(22)),
     signSpaceFacts({ supplier: accounts, space: team, assertedAt: time, clauses: [
-      ...(options.omit === "alice" ? [] : operations.map(op => at(grantor, authorization(alice, op, team)))),
-      ...operations.map(op => at(options.aliceAuthor ?? alice, authorization(bob, op, team))),
+      ...(options.omit === "alice" ? [] : operations.map(op => at(grantor, grant(alice, op)))),
+      ...operations.map(op => at(options.aliceAuthor ?? alice, grant(bob, op))),
       ...(options.operationBound !== false ? operations.map(op => at(bob, new Clause(
-        Goal.of("authorized", [Term.var("Person"), Term.fromValue(op), Term.fromValue(team)]),
+        Goal.of("authorized", [Term.var("Person"), operationTerm(op), Term.fromValue(team)]),
         conditionalGrant.body,
       ))) : [at(bob, conditionalGrant)]),
-      ...(options.alternative ? operations.map(op => at(grantor, authorization(carol, op, team))) : []),
+      ...(options.alternative ? operations.map(op => at(grantor, grant(carol, op))) : []),
     ] }, seed(23)),
     signSpaceFacts({ supplier: observer, space: team, assertedAt: time, clauses:
       options.omit === "observation" ? [] : [at(observer, fact("eligible", carol))],

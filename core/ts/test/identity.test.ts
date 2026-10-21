@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { Atom, BodyLit, Clause, Goal, Term, Tuple } from "@bitspark/logos-contract";
 import { decode, encode } from "@bitspark/ontos-codec";
 import { encodeText } from "@bitspark/ontos-data";
-import { atom, attributedClause, createSpacesVerifier, inspectAttributedClause, path } from "../src/index.js";
+import { atom, attributedClause, createSpacesVerifier, fact, inspectAttributedClause, path } from "../src/index.js";
 import { decodeIssuerSubjectPrincipal, issuerSubjectPrincipal } from "../src/identity.js";
 import { authenticateArchon } from "../src/archon.js";
 import { prove, ProofSearchError } from "../src/client.js";
@@ -62,6 +62,17 @@ test("account actors use full variable and supplier proofs for two unrelated voc
     throw error;
   });
   assert.equal(proofs.length, 2);
+});
+
+test("a shaped operation preserves its title variable through both onward delegations", async () => {
+  const verifier = createSpacesVerifier({ root, authenticate: authenticateArchon });
+  const bundles = accountBundles({ variableTitle: true });
+  for (const title of ["First title", "Another title"]) {
+    const query = { actor: carol, statement: fact("title", encodeText(title)), space: spaces[0]! };
+    const proof = await prove({ root, query, bundles });
+    assert.equal(verifier.verify({ query, proof }).permitted, true);
+    assert.equal(verifier.verify({ query: { ...query, statement: fact("title", encodeText("Changed request")) }, proof }).permitted, false);
+  }
 });
 
 test("a wide-operation policy certifies or reports the precise documented host-capacity stop", async t => {
