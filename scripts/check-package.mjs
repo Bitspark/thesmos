@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 // An actual packed consumer catches missing law assets and broken package exports.
 const npm = (args, cwd) => process.platform === "win32"
@@ -42,6 +42,45 @@ assert.equal(createSpacesVerifier({root, authenticate: authenticateArchon}).veri
 console.log('Packed client constructs a proof; packed verifier and law accept it in an independent consumer.');
 `);
 process.stdout.write(execFileSync(process.execPath, [join(directory, "check.mjs")], { encoding: "utf8", cwd: directory }));
+
+// Each installed entry point's static import graph keeps search, signing and network code out of
+// the entries that must not carry them: a receiver importing the root installs no search engine.
+const installed = join(directory, "node_modules", "@bitspark", "thesmos");
+const network = ["node:http", "node:https", "node:net", "node:tls", "node:dns", "node:dgram", "http", "https", "net", "tls", "dns"];
+const entries = {
+  ".": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network], noEntries: true },
+  "./identity": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network], noEntries: true },
+  "./archon": { forbidden: ["@bitspark/logos-kernel", ...network] },
+  "./client": { forbidden: [...network] },
+};
+const exportFile = key => join(installed, manifest.exports[key].default);
+const entryFiles = new Map(Object.keys(manifest.exports).filter(key => !key.includes("*"))
+  .map(key => [resolve(exportFile(key)), key]));
+for (const key of Object.keys(manifest.exports).filter(key => !key.includes("*"))) {
+  assert(entries[key], `Entry ${key} has no isolation rule in scripts/check-package.mjs`);
+}
+for (const [key, rule] of Object.entries(entries)) {
+  const start = resolve(exportFile(key));
+  const seen = new Set(), bare = new Set(), reached = new Set();
+  const visit = file => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    if (file !== start && entryFiles.has(file)) reached.add(entryFiles.get(file));
+    const source = readFileSync(file, "utf8");
+    for (const [, specifier] of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g)) {
+      if (specifier.startsWith(".")) visit(resolve(dirname(file), specifier));
+      else if (specifier.startsWith("@bitspark/thesmos/")) {
+        const target = manifest.exports["./" + specifier.slice("@bitspark/thesmos/".length)];
+        if (target) visit(resolve(installed, target.default));
+      } else bare.add(specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/"));
+    }
+  };
+  visit(start);
+  const violations = [...rule.forbidden.filter(name => bare.has(name)),
+    ...(rule.noEntries ? [...reached].map(entry => `entry ${entry}`) : [])];
+  assert.deepEqual(violations, [], `Entry ${key} imports ${violations.join(", ")}`);
+}
+console.log(`Entry isolation holds for ${Object.keys(entries).join(", ")}.`);
 // Retain the exact archive that passed the independent consumer check.
 mkdirSync(".build-artifacts", { recursive: true });
 copyFileSync(join(directory, pack.filename), join(".build-artifacts", pack.filename));
