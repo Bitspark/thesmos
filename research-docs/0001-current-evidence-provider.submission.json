@@ -1,0 +1,18 @@
+{
+  "attempts": [
+    {
+      "attempt": 1,
+      "idempotencyKey": "thesmos-core-research-0001-c474cf07-ea24-4ab4-93ab-3049881030b7",
+      "clientTag": "thesmos-core",
+      "collection": "thesmos-core-research",
+      "slug": "0001-current-evidence-provider",
+      "submittedPath": "research-docs/0001-current-evidence-provider.submitted.md",
+      "sha256": "b74dc338a9de3f8513238bf68367c9fd80809443ecfedc81f79ae696fc3f109d",
+      "size": 15191,
+      "codeRevision": "705807de1bc10ca960c39cb728faaf78f08d3c1e",
+      "cliBuild": "nightfall 0.1.0 e2640b38009d bundle ef085ca51a5d",
+      "recordedAt": "2026-10-21T04:17:04.5075356Z",
+      "state": "prepared"
+    }
+  ]
+}
