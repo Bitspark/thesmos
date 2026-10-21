@@ -10,7 +10,9 @@ No code may implement authority semantics of its own: the law and layer are the
 sole specification. An evaluator for an admitted profile may decide locally
 under the shared conformance contract and is trusted for those decisions;
 portable proofs must pass the unchanged checker; consumer adapters implement no
-authorization semantics. See [the runtime decision](docs/runtime.md).
+authorization semantics. No local evaluator is admitted until its profile and
+conformance corpus are published and the gate in issue 19 passes. See [the
+runtime decision](docs/runtime.md).
 
 Use a task worktree, branch and pull request. Run `npm run check`, obtain an
 independent review of the exact change, and squash merge after the required
