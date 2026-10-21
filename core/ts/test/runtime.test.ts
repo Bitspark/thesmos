@@ -1,13 +1,14 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { getPublicKey } from "@bitspark/archon";
-import { Atom, Clause, Goal, Term, Tuple, VarId, clauseFromValue, clauseValue, programBytes } from "@bitspark/logos-contract";
+import { Atom, Clause, DERIVATION_WIRE_V1_TAG, Goal, Term, Tuple, VarId, clauseFromValue, clauseValue, derivationWirePayloadV1ToValue, programBytes } from "@bitspark/logos-contract";
 import { decode, encode } from "@bitspark/ontos-codec";
 import { encodeInt } from "@bitspark/ontos-data";
 import { atom, authorization, attributedClause, createSpacesVerifier, decodeProof, fact, path } from "../src/index.js";
 import { authenticateArchon, signSpaceFacts } from "../src/archon.js";
 import { createSpacesRuntime, instantiateSpacesObservations, portableEnvelopeReserve, prepareSpacesOverlay, prepareSpacesProgram, PreparationRefused } from "../src/runtime.js";
 import { lawDigest, layerDigest, protocol } from "../src/data.js";
+import { ProofBuilder } from "./recipes.js";
 
 const seed = new Uint8Array(32).fill(71), observerSeed = new Uint8Array(32).fill(72);
 const root = new Atom(getPublicKey(seed)), observer = new Atom(getPublicKey(observerSeed));
@@ -73,10 +74,28 @@ test("the calculated envelope reserve bounds actual codec bytes at varint bounda
   const bundle = new Tuple([new Atom(new Uint8Array([1, 2, 3])), atom("authentication")]);
   const sourceBytes = encode(bundle).byteLength;
   for (const groups of [0, 127, 128, 2048]) for (const bytes of [0, 127, 128, 16383, 16384, 1048576]) {
+    // A valid codec payload is sufficient for the length boundary; the next
+    // case checks a real independently accepted derivation without source IDs.
+    const payload = new Atom(new Uint8Array(bytes));
+    const payloadBytes = encode(payload).byteLength;
+    const wire = encode(new Tuple([atom(DERIVATION_WIRE_V1_TAG), payload]));
     const envelope = encode(new Tuple([atom(protocol.format), lawDigest, layerDigest,
-      new Tuple(Array(groups).fill(bundle)), new Atom(new Uint8Array(bytes))]));
-    assert(envelope.byteLength <= sourceBytes * groups + bytes + portableEnvelopeReserve(bytes, groups));
+      new Tuple(Array(groups).fill(bundle)), new Atom(wire)]));
+    assert(envelope.byteLength <= sourceBytes * groups + payloadBytes + portableEnvelopeReserve(payloadBytes, groups));
   }
+});
+
+test("a real law-only proof fits the payload charge and complete wire reserve", () => {
+  const query = { actor: root, statement: atom("synthetic-action"), space: service };
+  const builder = new ProofBuilder();
+  const conclusion = builder.apply("root-authority", { R: root, F: query.statement, S: query.space }, [builder.anchor(root)]);
+  const proof = builder.finish(conclusion), decoded = decodeProof(proof);
+  assert.equal(decoded.bundles.length, 0);
+  assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon }).verify({ query, proof }).permitted, true);
+  const payloadBytes = encode(derivationWirePayloadV1ToValue(decoded.derivation)).byteLength;
+  // There are no attributed source IDs to shorten and hide missing overhead.
+  assert.equal(payloadBytes + portableEnvelopeReserve(payloadBytes, 0), proof.byteLength);
+  assert(payloadBytes + portableEnvelopeReserve(proof.byteLength, 0) >= proof.byteLength);
 });
 
 test("acquisition is independent of the portable clause limit and remains bounded", () => {

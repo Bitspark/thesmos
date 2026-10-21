@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  Atom, ClauseId, Derivation, MapProgram, RuleNode, Tuple, clauseFromValue, clauseValue, programBytes, programFromValue,
+  Atom, ClauseId, DERIVATION_WIRE_V1_TAG, Derivation, MapProgram, RuleNode, Tuple, clauseFromValue, clauseValue, programBytes, programFromValue,
   type Clause, type Value,
 } from "@bitspark/logos-contract";
 import { decode, encode, encodeUvarint } from "@bitspark/ontos-codec";
@@ -146,15 +146,19 @@ export type SpacesExport =
 
 /**
  * Frozen Ontos v1 uses tag + unsigned-LEB128 length/arity, then child bytes.
- * Bundle children are charged whole separately; FIRM account bytes are charged
- * by the provider. This is the complete remaining envelope overhead at the
+ * Bundle children are charged whole separately; unwrapped FIRM account payload
+ * bytes are charged by the provider. Spaces adds the public derivation wire tag
+ * and tuple around that payload. This is the remaining envelope overhead at the
  * maximum permitted bundle count and account length, both monotone bounds.
  */
 export function portableEnvelopeReserve(maxAccountBytes: number, maxGroups: number): number {
   if (![maxAccountBytes, maxGroups].every(validBound)) throw new TypeError("Finite envelope bounds are required");
   const header = (n: number) => 1 + encodeUvarint(n).byteLength;
+  const accountWrapper = header(2) + encode(atom(DERIVATION_WIRE_V1_TAG)).byteLength;
+  const maxWireBytes = maxAccountBytes + accountWrapper;
+  if (!validBound(maxWireBytes)) throw new TypeError("Account wire bound exceeds a safe integer");
   return header(5) + encode(atom(protocol.format)).byteLength + encode(lawDigest).byteLength +
-    encode(layerDigest).byteLength + header(maxGroups) + header(maxAccountBytes);
+    encode(layerDigest).byteLength + header(maxGroups) + header(maxWireBytes) + accountWrapper;
 }
 
 /** Reconstruct the envelope from recorded inference only, then independently check it. */

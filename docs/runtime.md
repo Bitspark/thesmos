@@ -162,11 +162,14 @@ proof-depth and term-depth bounds, so an oversized candidate cannot suppress a f
 The remaining
 Spaces envelope reserve is calculated from the frozen Ontos codec: the outer tuple header, encoded
 format/law/layer values, the bundle tuple header at the maximum group count, and the account atom
-header at the maximum account byte length. Bundle children are charged separately in full.
+header at the maximum wrapped account byte length. It also includes the public
+`proof-interchange/derivation/v1` tuple and tag around the native FIRM payload. Bundle children are
+charged separately in full.
 Original `supplied/<64 hex digits>/<index>` rule IDs become shorter `bundle/<position>/<index>`
 IDs; export asserts that this never enlarges an atom. All other account nodes remain unchanged,
 so the measured native account plus that reserve is a conservative byte bound. Boundary tests
-compare the reserve with actual envelope bytes across unsigned-LEB128 length/arity changes.
+compare the reserve with actual envelope bytes across unsigned-LEB128 length/arity changes and
+an independently accepted law-only proof, which has no source IDs to shorten.
 
 `replace(bundles)` prepares the new base before publishing it atomically. Already opened requests
 and retained witnesses keep their original interpretation. This first adapter rebuilds replacement
