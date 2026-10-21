@@ -37,7 +37,7 @@ type Source = {
 type ClauseSource = { readonly source: Source; readonly index: number };
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const copyBundle = (bundle: SpaceFactsBundle): SpaceFactsBundle => ({
-  payload: bundle.payload.slice(), authentication: decode(encode(bundle.authentication)),
+  payload: Uint8Array.from(bundle.payload), authentication: decode(encode(bundle.authentication)),
 });
 const validBound = (n: number) => Number.isSafeInteger(n) && n >= 0;
 

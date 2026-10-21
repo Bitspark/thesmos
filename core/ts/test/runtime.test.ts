@@ -41,7 +41,8 @@ const templates = [{ name: "signed-observed", parameters: [VarId.of("Author"), V
     Goal.of("authorized", [S, Term.fromValue(atom("supply_facts")), P])]) }];
 
 test("preparation authenticates copies and retains distinct whole source identities", () => {
-  const one = observation("one"), two = sign([attributedClause(observer, path("synthetic-requests", "one"), atom("observed"))],
+  const input = observation("one"), one = { ...input, payload: Buffer.from(input.payload) };
+  const two = sign([attributedClause(observer, path("synthetic-requests", "one"), atom("observed"))],
     observerSeed, path("synthetic-requests", "one"), 1n);
   const prepared = prepareSpacesOverlay({ bundles: [one, two], budget, authenticate: request => {
     const accepted = authenticateArchon(request); request.payload.fill(0);
@@ -52,6 +53,8 @@ test("preparation authenticates copies and retains distinct whole source identit
   assert.equal(new Set(prepared.sourceCosts().map(source => source.group)).size, 2);
   assert.deepEqual(prepared.selectedBundles()[0]!.payload, one.payload);
   one.payload.fill(0);
+  assert(prepared.selectedBundles()[0]!.payload.some(byte => byte !== 0));
+  prepared.selectedBundles()[0]!.payload.fill(0);
   assert(prepared.selectedBundles()[0]!.payload.some(byte => byte !== 0));
   for (const [, clause] of prepared.nativeProgram().entries()) {
     assert.equal(clause.body.length, 2);
