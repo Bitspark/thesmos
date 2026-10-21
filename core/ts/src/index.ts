@@ -11,7 +11,7 @@ import type { AuthenticateSpaceFacts, Decision, Query } from "./types.js";
 export type { AuthenticateSpaceFacts, Decision, Proof, Query, SpaceFacts, SpaceFactsBundle } from "./types.js";
 export type { Value } from "@bitspark/logos-contract";
 export { lawDigest, layerDigest } from "./data.js";
-export { atom, authorization, attributedClause, fact, list, path } from "./encoding.js";
+export { atom, authorization, attributedClause, inspectAttributedClause, fact, list, path } from "./encoding.js";
 export { encodeSpaceFacts, decodeSpaceFacts } from "./bundles.js";
 export { encodeProof, decodeProof } from "./proof.js";
 

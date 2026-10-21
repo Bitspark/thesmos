@@ -71,6 +71,15 @@ export function executableClause(assertion: Clause): Clause {
   ]);
 }
 
+/** Syntax only: this establishes neither authentic authorship nor authority. */
+export function inspectAttributedClause(assertion: Clause): { author: Value; space: Value } {
+  executableClause(assertion);
+  return {
+    author: Term.eraseGround(assertion.head.args[0]!)!,
+    space: Term.eraseGround(assertion.head.args[1]!)!,
+  };
+}
+
 /** Translate only a clause from an authenticated output at its exact placement. */
 export function suppliedClause(assertion: Clause, supplier: Value, placement: Value): Clause {
   executableClause(assertion); // Preserve the core's syntax and positive-body checks.

@@ -15,11 +15,13 @@ available:** the required `@bitspark/logos-contract@0.23.0` and optional client
 dependency `@bitspark/logos-kernel@0.23.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
-The [v1.0.0-preview.1 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.1)
-provides the exact package archive exercised by CI, with SHA-256 checksums.
-Consumers with the required Logos access can pin that archive; it bundles no
-private dependency code. The `/client` and `/archon` entries still require their
-optional peers at the versions below.
+Source version `1.0.0-preview.2` is being qualified. A release archive is usable
+only once it is attached to the corresponding GitHub release with its exact
+CI evidence and SHA-256 checksum. The existing
+[v1.0.0-preview.1 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.1)
+does not include `/identity`. Consumers need the stated Logos access; release
+archives bundle no private dependency code. The `/client` and `/archon` entries
+still require their optional peers at the versions below.
 
 With existing GitHub Packages read access, install the committed lockfile and
 run the complete gate:
@@ -75,12 +77,19 @@ and the exact rename; changed actor or title is denied without a state change.
 The [device example](examples/device-service.ts) uses the same law for an
 unrelated operation. All example keys and identities are synthetic.
 
+The [account example](examples/account-principals.ts) uses issuer-qualified
+people without personal keys: a non-root grantor establishes Alice's authority,
+Alice delegates to Bob, and Bob's variable conditional rule delegates to Carol.
+Separate suppliers support both the grants and the condition. See the
+[identity integration profile](docs/identity.md) for authentication boundaries,
+syntax-only record inspection and the optional `/identity` entry.
+
 ## Layout and boundaries
 
 | Location | Responsibility |
 | --- | --- |
 | [law/](law/common-law.logos) | Frozen common law and compiled Ontos data; separate asserter template |
-| [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter |
+| [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter; `/identity` issuer/subject profile |
 | [conformance/](conformance/frozen.json) | Frozen artifact pins; original corpus is `law/conformance.ontos` |
 | [core/ts/test/](core/ts/test/sdk.test.ts) | Core, asserter, mutation and client tests |
 | [docs/model.md](docs/model.md) | Model, trusted facts and implementation boundaries |

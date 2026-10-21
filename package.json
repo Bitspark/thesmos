@@ -1,6 +1,6 @@
 {
   "name": "@bitspark/thesmos",
-  "version": "1.0.0-preview.1",
+  "version": "1.0.0-preview.2",
   "description": "The Spaces authority law, with local Logos proof verification and an optional proof client.",
   "license": "Apache-2.0",
   "type": "module",
@@ -10,6 +10,7 @@
     ".": { "types": "./dist/core/ts/src/index.d.ts", "default": "./dist/core/ts/src/index.js" },
     "./client": { "types": "./dist/core/ts/src/client.d.ts", "default": "./dist/core/ts/src/client.js" },
     "./archon": { "types": "./dist/core/ts/src/archon.d.ts", "default": "./dist/core/ts/src/archon.js" },
+    "./identity": { "types": "./dist/core/ts/src/identity.d.ts", "default": "./dist/core/ts/src/identity.js" },
     "./law/*": "./law/*"
   },
   "files": ["dist/core/ts/src", "law", "README.md", "LICENSE", "NOTICE"],
@@ -19,7 +20,7 @@
     "test": "npm run build && node --test dist/core/ts/test/*.test.js",
     "law:check": "node scripts/compile-law.ts --check && node scripts/check-frozen.mjs",
     "check": "npm run law:check && npm test && npm run example && node scripts/check-package.mjs && node scripts/check-links.mjs && git diff --check",
-    "example": "node dist/examples/document-service.js && node dist/examples/device-service.js",
+    "example": "node dist/examples/document-service.js && node dist/examples/device-service.js && node dist/examples/account-principals.js",
     "prepack": "npm run build"
   },
   "dependencies": {
