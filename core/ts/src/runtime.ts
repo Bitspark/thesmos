@@ -41,23 +41,35 @@ const copyClause = (clause: Clause): Clause => {
 
 /** The witness retains exact source bytes independently of requests and publications. */
 export class SpacesWitness {
+  #state: { retained: RetainedPreparedWitness; root: Value; query: Query;
+    programs: readonly SpacesProgram[]; authenticate: AuthenticateSpaceFacts } | undefined;
   constructor(
     readonly snapshot: string,
-    private readonly retained: RetainedPreparedWitness,
-    private readonly root: Value,
-    private readonly query: Query,
-    private readonly programs: readonly SpacesProgram[],
-    private readonly authenticate: AuthenticateSpaceFacts,
-  ) {}
+    retained: RetainedPreparedWitness,
+    root: Value,
+    query: Query,
+    programs: readonly SpacesProgram[],
+    authenticate: AuthenticateSpaceFacts,
+  ) { this.#state = { retained, root, query, programs, authenticate }; }
 
-  diagnostics(): PreparedWitnessDiagnostics { return this.retained.diagnostics(); }
-  async export(budget?: CarryingBudget): Promise<SpacesExport> {
-    const candidate = await this.retained.export();
-    if (!candidate.derivation) return { kind: "unavailable", reason: "invalid-witness", detail: "Retained support exported no derivation" };
-    return exportSpacesProof({ root: this.root, query: this.query, programs: this.programs,
-      derivation: candidate.derivation, authenticate: this.authenticate, budget });
+  #live() {
+    if (!this.#state) throw new PreparedSessionError("witness_closed");
+    return this.#state;
   }
-  close(): void { this.retained.close(); }
+  diagnostics(): PreparedWitnessDiagnostics { return this.#live().retained.diagnostics(); }
+  async export(budget?: CarryingBudget): Promise<SpacesExport> {
+    const state = this.#live();
+    const capturedBudget = budget && Object.freeze({ ...budget });
+    const candidate = await state.retained.export();
+    if (!candidate.derivation) return { kind: "unavailable", reason: "invalid-witness", detail: "Retained support exported no derivation" };
+    return exportSpacesProof({ root: state.root, query: state.query, programs: state.programs,
+      derivation: candidate.derivation, authenticate: state.authenticate, budget: capturedBudget });
+  }
+  close(): void {
+    const state = this.#state;
+    this.#state = undefined;
+    state?.retained.close();
+  }
 }
 
 export interface SpacesRuntimeConfig {
@@ -87,20 +99,73 @@ export interface SpacesPreparedRequest {
   close(): void;
 }
 
+interface RequestState {
+  readonly execution: PreparedQuery;
+  readonly admission: PreparedAdmission;
+  readonly root: Value;
+  readonly query: Query;
+  readonly programs: readonly SpacesProgram[];
+  readonly authenticate: AuthenticateSpaceFacts;
+  readonly required: boolean;
+  readonly carryingBudget?: CarryingBudget;
+  readonly signal?: AbortSignal;
+}
+
+/** Clear host context too: retaining a closed request must not retain its old base. */
+class PreparedSpacesRequest implements SpacesPreparedRequest {
+  #state: RequestState | undefined;
+  constructor(state: RequestState) { this.#state = state; }
+  #live(): RequestState {
+    if (!this.#state) throw new PreparedSessionError("request_closed");
+    return this.#state;
+  }
+  get admission(): PreparedAdmission { return this.#live().admission; }
+  diagnostics(): PreparedQueryDiagnostics { return this.#live().execution.diagnostics(); }
+  async run(): Promise<SpacesRuntimeDecision> {
+    // An operation that already started owns its context until it settles.
+    const state = this.#live();
+    const result = await state.execution.run(state.signal), snapshot = hex(result.snapshot.bytes);
+    if (result.completion.kind === "incomplete") return { kind: "unsupported", detail: result.completion.reason, outcome: result.outcome };
+    if (result.completion.kind === "absent") return { kind: "forbidden", snapshot, outcome: result.outcome };
+    const retained = result.witnesses[0];
+    if (!retained) return { kind: "unsupported", detail: "The provider returned no retained support", outcome: result.outcome };
+    for (const extra of result.witnesses.slice(1)) extra.close();
+    const witness = new SpacesWitness(snapshot, retained, state.root, state.query, state.programs, state.authenticate);
+    if (state.required) {
+      let exported: SpacesExport;
+      try { exported = await witness.export(state.carryingBudget); }
+      catch (error) { witness.close(); throw error; }
+      if (exported.kind !== "exported") { witness.close(); return { kind: "unsupported", detail: `${exported.reason}: ${exported.detail}`, outcome: result.outcome }; }
+      return { kind: "permitted", snapshot, outcome: result.outcome, witness, proof: exported.proof };
+    }
+    return { kind: "permitted", snapshot, outcome: result.outcome, witness };
+  }
+  close(): void {
+    const state = this.#state;
+    this.#state = undefined;
+    state?.execution.close();
+  }
+}
+
+interface RuntimeState {
+  readonly config: Omit<SpacesRuntimeConfig, "bundles">;
+  readonly owner: Session;
+  readonly factory: PreparedViewFactory;
+  readonly profile: CheckProfile<undefined>;
+  base: SpacesProgram;
+  lease: PreparedViewLease;
+}
+
 /** A thin source and evidence adapter; all evaluation and admission belong to Logos. */
 export class SpacesRuntime {
-  #base: SpacesProgram;
-  #lease: PreparedViewLease;
-  #closed = false;
+  #state: RuntimeState | undefined;
+  #baseIdentity: string;
   #replacing = false;
-  private constructor(
-    private readonly config: SpacesRuntimeConfig,
-    private readonly owner: Session,
-    private readonly factory: PreparedViewFactory,
-    private readonly profile: CheckProfile<undefined>,
-    base: SpacesProgram,
-    lease: PreparedViewLease,
-  ) { this.#base = base; this.#lease = lease; }
+  private constructor(state: RuntimeState) { this.#state = state; this.#baseIdentity = state.base.identity; }
+  #live(): RuntimeState {
+    if (!this.#state) throw new PreparedSessionError("runtime_closed");
+    return this.#state;
+  }
 
   static async open(config: SpacesRuntimeConfig): Promise<SpacesRuntime> {
     config = { ...config, root: copyValue(config.root),
@@ -115,35 +180,40 @@ export class SpacesRuntime {
         verify: claim => claim.equals(anchor) ? { kind: "admit" } : { kind: "reject", code: "unaccepted_premise" } },
       admit: new AlwaysAdmit<undefined>(), limits: { ...checkLimits },
     };
-    const captured = { ...config, bundles: base.selectedBundles(), preparationBudget: Object.freeze({ ...config.preparationBudget }),
+    const captured: Omit<SpacesRuntimeConfig, "bundles"> = { root: config.root, authenticate: config.authenticate,
+      memoryLimitPages: config.memoryLimitPages, preparationBudget: Object.freeze({ ...config.preparationBudget }),
       observationTemplates: Object.freeze((config.observationTemplates ?? []).map(t => Object.freeze({ ...t, parameters: Object.freeze([...t.parameters]) }))),
       limits: config.limits && Object.freeze({ ...config.limits }) };
     const factory = WasmPreparedFactory.create({ checkProfile: profile, ctx: undefined, memoryLimitPages: config.memoryLimitPages,
       templates: captured.observationTemplates, limits: captured.limits });
     const owner = Session.open(Program.fromLookup(base.nativeProgram()), Bindings.empty().bind("root/1", [anchor]), Multiplicity.Set);
-    try { return new SpacesRuntime(captured, owner, factory, profile, base, await owner.prepare(factory)); }
+    try { return new SpacesRuntime({ config: captured, owner, factory, profile, base, lease: await owner.prepare(factory) }); }
     catch (error) { owner.close(); throw error; }
   }
 
-  get baseIdentity(): string { return this.#base.identity; }
-  diagnostics(): PreparedViewDiagnostics { return this.#lease.diagnostics(); }
+  get baseIdentity(): string { return this.#baseIdentity; }
+  diagnostics(): PreparedViewDiagnostics { return this.#live().lease.diagnostics(); }
 
   /** Replacement is prepared before publication. Existing requests keep their old lease. */
   async replace(bundles: readonly SpaceFactsBundle[]): Promise<void> {
-    if (this.#closed || this.#replacing) throw new Error("Runtime is closed or a replacement is already being prepared");
+    const state = this.#live();
+    if (this.#replacing) throw new PreparedSessionError("replacement_in_progress");
     this.#replacing = true;
     try {
-      const base = prepareSpacesProgram({ bundles, authenticate: this.config.authenticate, budget: this.config.preparationBudget });
-      const anchor = inputLiteral(fact("root", this.config.root));
-      const ticket = await this.owner.prepareReplacement(Program.fromLookup(base.nativeProgram()), Bindings.empty().bind("root/1", [anchor]), this.factory);
-      try { this.owner.publish(ticket); } catch (error) { ticket.close(); throw error; }
-      const lease = this.owner.pin(), previous = this.#lease;
-      this.#base = base; this.#lease = lease;
+      const base = prepareSpacesProgram({ bundles, authenticate: state.config.authenticate, budget: state.config.preparationBudget });
+      const anchor = inputLiteral(fact("root", state.config.root));
+      const ticket = await state.owner.prepareReplacement(Program.fromLookup(base.nativeProgram()), Bindings.empty().bind("root/1", [anchor]), state.factory);
+      try {
+        if (this.#state !== state) throw new PreparedSessionError("runtime_closed");
+        state.owner.publish(ticket);
+      } catch (error) { ticket.close(); throw error; }
+      const lease = state.owner.pin(), previous = state.lease;
+      state.base = base; state.lease = lease; this.#baseIdentity = base.identity;
       previous.close();
     } finally { this.#replacing = false; }
   }
 
-  #portableSupport(programs: readonly SpacesProgram[], budget?: CarryingBudget): CatalogSupportPolicy {
+  #portableSupport(state: RuntimeState, programs: readonly SpacesProgram[], budget?: CarryingBudget): CatalogSupportPolicy {
     for (const [bound, maximum] of [[budget?.maxBytes, protocol.limits.maxProofBytes],
       [budget?.maxClauses, protocol.limits.maxProofSteps], [budget?.maxSteps, protocol.limits.maxProofSteps]]) {
       if (bound !== undefined && (!Number.isSafeInteger(bound) || bound < 0 || bound > maximum!))
@@ -166,46 +236,32 @@ export class SpacesRuntime {
       maxAccountDepth: protocol.limits.maxProofDepth,
       maxTermDepth: protocol.limits.maxTermDepth,
       reservedEnvelopeBytes: portableEnvelopeReserve(budget?.maxBytes ?? protocol.limits.maxProofBytes, protocol.limits.maxProofSteps) };
-    const binding = deriveCheckProfileSpec(this.profile);
+    const binding = deriveCheckProfileSpec(state.profile);
     const digest = createHash("sha256").update(JSON.stringify({ programs: programs.map(p => p.identity), cost,
-      root: hex(encode(this.config.root)), profile: binding.digest().toHex() })).digest();
+      root: hex(encode(state.config.root)), profile: binding.digest().toHex() })).digest();
     return { kind: "portable", identity: ComponentBinding.of("thesmos/signed-source-catalog", "1", Digest.of(digest)),
       groups: [...groups.values()], budget: cost, entries: [
         ...[...rules].map(([id, sourceGroups]) => ({ source: { kind: "rule" as const, clauseId: ClauseId.of(id), meta: NodeMeta.none() }, groups: sourceGroups })),
-        { source: { kind: "leaf", fact: inputLiteral(fact("root", this.config.root)), evidence: Evidence.none() }, groups: [] },
+        { source: { kind: "leaf", fact: inputLiteral(fact("root", state.config.root)), evidence: Evidence.none() }, groups: [] },
         { source: { kind: "builtin", binding: binding.theories[0]! }, groups: [] },
       ] };
   }
 
   async request(request: SpacesRequestOptions): Promise<SpacesPreparedRequest> {
-    if (this.#closed) throw new Error("Runtime is closed");
-    const base = this.#base, lease = this.#lease;
+    const state = this.#live(), { base, lease, config } = state;
     const query = Object.freeze({ actor: copyValue(request.query.actor), space: copyValue(request.query.space), statement: copyValue(request.query.statement) });
     const carryingBudget = request.carryingBudget && Object.freeze({ ...request.carryingBudget });
     const required = request.portable === "required", signal = request.signal;
-    const overlay = prepareSpacesOverlay({ bundles: request.observations, authenticate: this.config.authenticate, budget: this.config.preparationBudget });
+    const overlay = prepareSpacesOverlay({ bundles: request.observations, authenticate: config.authenticate, budget: config.preparationBudget });
     const execution: PreparedQuery = await lease.request({ goal: inputLiteral(authorization(query.actor, query.statement, query.space)).toGoal(),
-      fragments: instantiateSpacesObservations(overlay, this.config.observationTemplates ?? []), limits: this.config.limits,
-      support: required ? this.#portableSupport([base, overlay], carryingBudget) : { kind: "local" },
+      fragments: instantiateSpacesObservations(overlay, config.observationTemplates ?? []), limits: config.limits,
+      support: required ? this.#portableSupport(state, [base, overlay], carryingBudget) : { kind: "local" },
       evidence: required ? { policy: "generate", retention: "retain", verify: { kind: "every" } }
         : { policy: "none", retention: "discard", verify: { kind: "none" } }, witnessCapture: "retain" });
-    return { admission: execution.admission(), diagnostics: () => execution.diagnostics(), close: () => execution.close(), run: async () => {
-      const result = await execution.run(signal), snapshot = hex(result.snapshot.bytes);
-      if (result.completion.kind === "incomplete") return { kind: "unsupported", detail: result.completion.reason, outcome: result.outcome };
-      if (result.completion.kind === "absent") return { kind: "forbidden", snapshot, outcome: result.outcome };
-      const retained = result.witnesses[0];
-      if (!retained) return { kind: "unsupported", detail: "The provider returned no retained support", outcome: result.outcome };
-      for (const extra of result.witnesses.slice(1)) extra.close();
-      const witness = new SpacesWitness(snapshot, retained, this.config.root, query, [base, overlay], this.config.authenticate);
-      if (required) {
-        let exported: SpacesExport;
-        try { exported = await witness.export(carryingBudget); }
-        catch (error) { witness.close(); throw error; }
-        if (exported.kind !== "exported") { witness.close(); return { kind: "unsupported", detail: `${exported.reason}: ${exported.detail}`, outcome: result.outcome }; }
-        return { kind: "permitted", snapshot, outcome: result.outcome, witness, proof: exported.proof };
-      }
-      return { kind: "permitted", snapshot, outcome: result.outcome, witness };
-    } };
+    try {
+      return new PreparedSpacesRequest({ execution, admission: execution.admission(), root: config.root, query,
+        programs: [base, overlay], authenticate: config.authenticate, required, carryingBudget, signal });
+    } catch (error) { execution.close(); throw error; }
   }
 
   async decide(request: SpacesRequestOptions): Promise<SpacesRuntimeDecision> {
@@ -219,9 +275,10 @@ export class SpacesRuntime {
   }
 
   close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    this.#lease.close(); this.owner.close();
+    const state = this.#state;
+    this.#state = undefined;
+    if (!state) return;
+    try { state.lease.close(); } finally { state.owner.close(); }
   }
 }
 

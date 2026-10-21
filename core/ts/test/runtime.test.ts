@@ -4,6 +4,7 @@ import { getPublicKey } from "@bitspark/archon";
 import { Atom, Clause, DERIVATION_WIRE_V1_TAG, Goal, Term, Tuple, VarId, clauseFromValue, clauseValue, derivationWirePayloadV1ToValue, programBytes } from "@bitspark/logos-contract";
 import { decode, encode } from "@bitspark/ontos-codec";
 import { encodeInt } from "@bitspark/ontos-data";
+import { PreparedSessionError } from "@bitspark/logos-kernel";
 import { atom, authorization, attributedClause, createSpacesVerifier, decodeProof, fact, path } from "../src/index.js";
 import { authenticateArchon, signSpaceFacts } from "../src/archon.js";
 import { createSpacesRuntime, instantiateSpacesObservations, portableEnvelopeReserve, prepareSpacesOverlay, prepareSpacesProgram, PreparationRefused, SpacesWitness } from "../src/runtime.js";
@@ -198,13 +199,16 @@ test("a rejected required export releases its detached witness", async t => {
 test("required export chooses a source whose authentication fits the frozen envelope", async () => {
   const query = { actor, statement: atom("synthetic-action"), space: service };
   const source = sign([attributedClause(root, path(), authorization(actor, query.statement, service))]);
-  let authentication: Atom | Tuple = atom("synthetic-authentication");
-  for (let depth = 0; depth < protocol.limits.maxWireDepth; depth++) authentication = new Tuple([authentication]);
-  const deep = { payload: source.payload, authentication };
+  const nested = (depth: number) => {
+    let authentication: Atom | Tuple = atom("synthetic-authentication");
+    for (let level = 0; level < depth; level++) authentication = new Tuple([authentication]);
+    return { payload: source.payload, authentication };
+  };
+  const boundary = nested(protocol.limits.maxWireDepth - 3), deep = nested(protocol.limits.maxWireDepth - 2);
   const normal = { payload: source.payload, authentication: atom("synthetic-shallow-authentication") };
   const authenticate = () => true;
-  const prepared = prepareSpacesProgram({ bundles: [deep, normal], authenticate, budget });
-  assert.deepEqual(prepared.sourceCosts().map(cost => cost.portable), [false, true]);
+  const prepared = prepareSpacesProgram({ bundles: [boundary, deep, normal], authenticate, budget });
+  assert.deepEqual(prepared.sourceCosts().map(cost => cost.portable), [true, false, true]);
   const runtime = await createSpacesRuntime({ root, bundles: [deep, normal], authenticate, preparationBudget: budget });
   try {
     const decision = await runtime.decide({ query, observations: [], portable: "required" });
@@ -217,4 +221,45 @@ test("required export chooses a source whose authentication fits the frozen enve
       assert(carried[0]!.authentication.equals(normal.authentication));
     } finally { decision.witness.close(); }
   } finally { runtime.close(); }
+  const localOnly = await createSpacesRuntime({ root, bundles: [deep], authenticate, preparationBudget: budget });
+  try {
+    const optional = await localOnly.decide({ query, observations: [] });
+    assert.equal(optional.kind, "permitted", optional.kind === "unsupported" ? optional.detail : undefined);
+    if (optional.kind === "permitted") {
+      try { assert.equal((await optional.witness.export()).kind, "unavailable"); }
+      finally { optional.witness.close(); }
+    }
+    const required = await localOnly.decide({ query, observations: [], portable: "required" });
+    assert.equal(required.kind, "unsupported");
+  } finally { localOnly.close(); }
+});
+
+test("closed wrappers refuse new work while an already started export owns its context", async () => {
+  const runtime = await createSpacesRuntime({ root, bundles: base(), authenticate: authenticateArchon,
+    preparationBudget: budget, observationTemplates: templates });
+  const request = await runtime.request({ query: query("retired"), observations: [observation("retired")] });
+  const closed = (reason: string) => (error: unknown) => error instanceof PreparedSessionError && error.reason === reason;
+  let witness: SpacesWitness | undefined;
+  try {
+    const decision = await request.run();
+    assert.equal(decision.kind, "permitted", decision.kind === "unsupported" ? decision.detail : undefined);
+    if (decision.kind !== "permitted") return;
+    witness = decision.witness;
+    request.close(); runtime.close();
+    assert.throws(() => request.admission, closed("request_closed"));
+    assert.throws(() => request.diagnostics(), closed("request_closed"));
+    await assert.rejects(request.run(), closed("request_closed"));
+    assert.throws(() => runtime.diagnostics(), closed("runtime_closed"));
+    await assert.rejects(runtime.request({ query: query("later"), observations: [] }), closed("runtime_closed"));
+    await assert.rejects(runtime.replace([]), closed("runtime_closed"));
+    assert(Object.values(witness.diagnostics().registry).every(count => count === 0));
+    const pending = witness.export();
+    witness.close();
+    assert.throws(() => witness!.diagnostics(), closed("witness_closed"));
+    await assert.rejects(witness.export(), closed("witness_closed"));
+    const exported = await pending;
+    assert.equal(exported.kind, "exported");
+    if (exported.kind === "exported") assert.equal(createSpacesVerifier({ root, authenticate: authenticateArchon })
+      .verify({ query: query("retired"), proof: exported.proof }).permitted, true);
+  } finally { witness?.close(); request.close(); runtime.close(); }
 });

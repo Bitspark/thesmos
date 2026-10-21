@@ -155,6 +155,10 @@ view of Logos's read-only counters. Base clauses, index entries, supports, reque
 execution work are logical counts; encoded capsule bytes are measured bytes. They are not heap
 or RSS estimates. Closed live handles report the provider's named error instead of invented zero
 counts. Process memory and its peak must be measured separately by the host.
+Closing a runtime, request or witness releases its owned host references to policy and signed
+source data as well as its native handle. Closed objects reject new work; an operation already
+started keeps its captured context until it settles. An independently retained witness survives
+request and runtime closure until the witness itself closes.
 
 A permitted result owns a witness. Close it after use. The default fast path asks Logos for no
 ordinary generated account and separately retains private support; `witness.export()` materializes
