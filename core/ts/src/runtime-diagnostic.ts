@@ -4,9 +4,11 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getHeapStatistics } from "node:v8";
 import type { PreparedViewFactory } from "@bitspark/logos-kernel";
+import { copyPreparedResourceRecord, type PreparedResourceRecord } from "./runtime-resource-observation.js";
 
 let sequence = 0;
 let activation = 0;
+let resourceSequence = 0;
 let activePreparedScope: number | undefined;
 const noSink = () => {};
 type DiagnosticEdge = "start" | "complete" | "failed" | "observed" | "unavailable" | "read-failed" | "invalid";
@@ -57,7 +59,7 @@ export function runtimeFailure(id: number, phase: string, error: unknown): void 
   catch { diagnosticFailure(id, phase, "failed"); }
 }
 
-export function beginRuntimeDiagnostic(operation: "create" | "replace" | "request"): number {
+function beginRuntimeDiagnostic(operation: string): number {
   const id = ++activation;
   runtimeCheckpoint(id, operation, "start");
   return id;
@@ -226,23 +228,115 @@ function installOperationSink(id: number): () => void {
   };
 }
 
-/** Keep both sinks active through the actual request and its product cleanup. */
-export async function diagnosticRequest<T>(operation: () => Promise<T>): Promise<T> {
-  const id = beginRuntimeDiagnostic("request");
+const resourceModeKey = Symbol.for("logos.prepared.resource-observer.mode");
+const resourceSinkKey = Symbol.for("logos.prepared.resource-observer");
+
+function installResourceSink(id: number, lifecycle: string): () => void {
+  const mode = process.env.PREPARED_RESOURCE_OBSERVER_MODE;
+  // Absence is a separate calibration arm. Do not manufacture a descriptor or
+  // silently inherit a foreign mode and call that an uninstrumented process.
+  if (mode === undefined) {
+    try {
+      if (Object.getOwnPropertyDescriptor(globalThis, resourceModeKey) !== undefined ||
+          Object.getOwnPropertyDescriptor(globalThis, resourceSinkKey) !== undefined)
+        diagnosticFailure(id, "resource-mode", "unexpected-descriptor");
+    } catch { diagnosticFailure(id, "resource-mode", "inspect-failed"); }
+    return noSink;
+  }
+  if (mode !== "minimal" && mode !== "compiled-disabled") {
+    diagnosticFailure(id, "resource-mode", "invalid-selection");
+    return noSink;
+  }
+  const sink = function (record: unknown): void {
+    try {
+      if (arguments.length !== 1) throw new TypeError("Expected one fixed resource record");
+      const copied = copyPreparedResourceRecord(record);
+      if (copied.mode !== mode) throw new TypeError("The Searcher mode differs from this observation scope");
+      writeResourceObservation(id, lifecycle, copied);
+    } catch { diagnosticFailure(id, "resource-sink", "invalid-or-unwritten-event"); }
+  };
+  let previousMode: PropertyDescriptor | undefined, previousSink: PropertyDescriptor | undefined;
+  let modeInstalled = false, sinkInstalled = false;
+  try {
+    previousMode = Object.getOwnPropertyDescriptor(globalThis, resourceModeKey);
+    Object.defineProperty(globalThis, resourceModeKey, { value: mode, writable: true, configurable: true, enumerable: false });
+    modeInstalled = true;
+    previousSink = Object.getOwnPropertyDescriptor(globalThis, resourceSinkKey);
+    Object.defineProperty(globalThis, resourceSinkKey, { value: sink, writable: true, configurable: true, enumerable: false });
+    sinkInstalled = true;
+  } catch { diagnosticFailure(id, "resource-sink", "install-failed"); }
+  return () => {
+    if (sinkInstalled) {
+      try {
+        if (Object.getOwnPropertyDescriptor(globalThis, resourceSinkKey)?.value !== sink)
+          diagnosticFailure(id, "resource-sink", "ownership-changed");
+        else if (previousSink) Object.defineProperty(globalThis, resourceSinkKey, previousSink);
+        else if (!Reflect.deleteProperty(globalThis, resourceSinkKey)) throw new Error("Resource sink removal failed");
+      } catch { diagnosticFailure(id, "resource-sink", "restore-failed"); }
+    }
+    if (modeInstalled) {
+      try {
+        const current = Object.getOwnPropertyDescriptor(globalThis, resourceModeKey);
+        if (current?.value !== mode || current.writable !== true || current.configurable !== true || current.enumerable !== false)
+          diagnosticFailure(id, "resource-mode", "ownership-changed");
+        else if (previousMode) Object.defineProperty(globalThis, resourceModeKey, previousMode);
+        else if (!Reflect.deleteProperty(globalThis, resourceModeKey)) throw new Error("Resource mode removal failed");
+      } catch { diagnosticFailure(id, "resource-mode", "restore-failed"); }
+    }
+  };
+}
+
+function preparedScope(id: number, lifecycle: string): () => void {
   const owned = claimPreparedScope(id);
+  const restoreFactory = owned ? installFactorySink(id) : noSink;
   const restoreNative = owned ? installNativeSink(id) : noSink;
   const restoreOperation = owned ? installOperationSink(id) : noSink;
+  const restoreResources = owned ? installResourceSink(id, lifecycle) : noSink;
+  return () => {
+    try { restoreResources(); }
+    finally {
+      try { restoreOperation(); }
+      finally {
+        try { restoreNative(); }
+        finally { try { restoreFactory(); } finally { releasePreparedScope(id, owned); } }
+      }
+    }
+  };
+}
+
+/** One actual asynchronous operation, including its existing catch/finally cleanup.
+ * These windows are diagnostic operation scopes, not Nightyard's public lifecycle timers.
+ * An unrelated nested or concurrent call cannot borrow an already-active sink. */
+export async function diagnosticPreparedAsync<T>(phase: string, operation: (id: number) => Promise<T>): Promise<T> {
+  const id = beginRuntimeDiagnostic(phase);
+  const restore = preparedScope(id, phase);
   try {
-    const result = await operation();
-    runtimeCheckpoint(id, "request", "complete");
+    const result = await operation(id);
+    runtimeCheckpoint(id, phase, "complete");
     return result;
   } catch (error) {
-    runtimeFailure(id, "request", error);
+    runtimeFailure(id, phase, error);
     throw error;
-  } finally {
-    try { restoreOperation(); }
-    finally { try { restoreNative(); } finally { releasePreparedScope(id, owned); } }
-  }
+  } finally { restore(); }
+}
+
+/** Synchronous teardown/inspection stays synchronous and preserves exact thrown values. */
+export function diagnosticPreparedSync<T>(phase: string, operation: () => T): T {
+  const id = beginRuntimeDiagnostic(phase);
+  const restore = preparedScope(id, phase);
+  try {
+    const result = operation();
+    runtimeCheckpoint(id, phase, "complete");
+    return result;
+  } catch (error) {
+    runtimeFailure(id, phase, error);
+    throw error;
+  } finally { restore(); }
+}
+
+/** Admission scope; execution and later retained-witness work have separate windows. */
+export function diagnosticRequest<T>(operation: () => Promise<T>): Promise<T> {
+  return diagnosticPreparedAsync("request", operation);
 }
 
 function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail?: string, failure?: FailureSnapshot): void {
@@ -267,6 +361,32 @@ function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail
     rss: record.memory.rss, heapLimit: record.heapLimit }));
 }
 
+function writeResourceObservation(id: number, lifecycle: string, observation: PreparedResourceRecord): void {
+  const env = process.env;
+  if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_EVENT_NAME !== "workflow_dispatch" || !env.RUNNER_TEMP ||
+      !/^\d+$/.test(env.GITHUB_RUN_ID ?? "") || !env.GITHUB_EVENT_PATH ||
+      !/^[a-f0-9]{40}$/.test(env.LOGOS_REVISION ?? "") || !/^[a-f0-9]{40}$/.test(env.THESMOS_REVISION ?? "") ||
+      !/^[a-f0-9]{64}$/.test(env.PREPARED_BUILD_RECEIPT_SHA256 ?? "") ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(env.PREPARED_OBSERVATION_CAPTURE_ID ?? "") ||
+      !/^[a-f0-9]{64}$/.test(env.PREPARED_OBSERVATION_CONFIGURATION_SHA256 ?? "") ||
+      !["minimal-diagnostic", "focused-diagnostic"].includes(env.PREPARED_OBSERVATION_EXECUTION_CLASS ?? ""))
+    throw new Error("Resource observations require the exact-source remote diagnostic context");
+  const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
+  if (event.repository?.full_name !== "Bitspark/nightyard" || event.inputs?.mode !== "profile-current")
+    throw new Error("Resource observations require the actual profile-current workflow dispatch");
+  const record = {
+    format: "thesmos/prepared-resource-observation/1", sequence: ++resourceSequence,
+    activation: id, lifecycle, at: new Date().toISOString(), elapsedMs: performance.now(),
+    timeOriginMs: performance.timeOrigin, pid: process.pid,
+    source: { logos: env.LOGOS_REVISION, thesmos: env.THESMOS_REVISION },
+    run: env.GITHUB_RUN_ID, buildReceiptSha256: env.PREPARED_BUILD_RECEIPT_SHA256,
+    captureId: env.PREPARED_OBSERVATION_CAPTURE_ID,
+    configurationSha256: env.PREPARED_OBSERVATION_CONFIGURATION_SHA256,
+    executionClass: env.PREPARED_OBSERVATION_EXECUTION_CLASS, observation,
+  };
+  appendFileSync(join(env.RUNNER_TEMP, "prepared-spaces", "runtime-resources.ndjson"), JSON.stringify(record) + "\n");
+}
+
 export function runtimePhase<T>(id: number, phase: string, operation: () => T): T {
   runtimeCheckpoint(id, phase, "start");
   try {
@@ -279,14 +399,11 @@ export function runtimePhase<T>(id: number, phase: string, operation: () => T): 
   }
 }
 
-/** Entry occurs only after Session's isolation capture, without capturing another graph. */
+/** Checkpoints inside an explicitly owned outer create/replace scope. Entry occurs only
+ * after Session's isolation capture; this adapter neither claims nor borrows global sinks. */
 export function diagnosticFactory(id: number, factory: PreparedViewFactory): PreparedViewFactory {
   return {
     async prepare(input) {
-      const owned = claimPreparedScope(id);
-      const restoreSink = owned ? installFactorySink(id) : noSink;
-      const restoreNativeSink = owned ? installNativeSink(id) : noSink;
-      const restoreOperationSink = owned ? installOperationSink(id) : noSink;
       runtimeCheckpoint(id, "factory-prepare", "start");
       try {
         // Invoke the actual receiver; the wrapper owns neither the input nor the
@@ -297,12 +414,6 @@ export function diagnosticFactory(id: number, factory: PreparedViewFactory): Pre
       } catch (error) {
         runtimeFailure(id, "factory-prepare", error);
         throw error;
-      } finally {
-        try { restoreOperationSink(); }
-        finally {
-          try { restoreNativeSink(); }
-          finally { try { restoreSink(); } finally { releasePreparedScope(id, owned); } }
-        }
       }
     },
   };

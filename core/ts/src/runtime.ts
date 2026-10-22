@@ -20,7 +20,7 @@ import {
 } from "./runtime-source.js";
 export { instantiateSpacesObservations } from "./runtime-fragments.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
-import { beginRuntimeDiagnostic, diagnosticFactory, diagnosticRequest, runtimeCheckpoint, runtimeFailure, runtimePhase } from "./runtime-diagnostic.js";
+import { diagnosticFactory, diagnosticPreparedAsync, diagnosticPreparedSync, diagnosticRequest, runtimeCheckpoint, runtimeFailure, runtimePhase } from "./runtime-diagnostic.js";
 
 export {
   exportSpacesProof, portableEnvelopeReserve, PreparationRefused, prepareSpacesOverlay, prepareSpacesProgram, SpacesProgram,
@@ -57,19 +57,23 @@ export class SpacesWitness {
     if (!this.#state) throw new PreparedSessionError("witness_closed");
     return this.#state;
   }
-  diagnostics(): PreparedWitnessDiagnostics { return this.#live().retained.diagnostics(); }
+  diagnostics(): PreparedWitnessDiagnostics { return diagnosticPreparedSync("witness-diagnostics", () => this.#live().retained.diagnostics()); }
   async export(budget?: CarryingBudget): Promise<SpacesExport> {
-    const state = this.#live();
-    const capturedBudget = budget && Object.freeze({ ...budget });
-    const candidate = await state.retained.export();
-    if (!candidate.derivation) return { kind: "unavailable", reason: "invalid-witness", detail: "Retained support exported no derivation" };
-    return exportSpacesProof({ root: state.root, query: state.query, programs: state.programs,
-      derivation: candidate.derivation, authenticate: state.authenticate, budget: capturedBudget });
+    return diagnosticPreparedAsync("witness-export", async () => {
+      const state = this.#live();
+      const capturedBudget = budget && Object.freeze({ ...budget });
+      const candidate = await state.retained.export();
+      if (!candidate.derivation) return { kind: "unavailable", reason: "invalid-witness", detail: "Retained support exported no derivation" };
+      return exportSpacesProof({ root: state.root, query: state.query, programs: state.programs,
+        derivation: candidate.derivation, authenticate: state.authenticate, budget: capturedBudget });
+    });
   }
   close(): void {
-    const state = this.#state;
-    this.#state = undefined;
-    state?.retained.close();
+    diagnosticPreparedSync("witness-close", () => {
+      const state = this.#state;
+      this.#state = undefined;
+      state?.retained.close();
+    });
   }
 }
 
@@ -121,16 +125,18 @@ class PreparedSpacesRequest implements SpacesPreparedRequest {
     return this.#state;
   }
   get admission(): PreparedAdmission { return this.#live().admission; }
-  diagnostics(): PreparedQueryDiagnostics { return this.#live().execution.diagnostics(); }
+  diagnostics(): PreparedQueryDiagnostics { return diagnosticPreparedSync("request-diagnostics", () => this.#live().execution.diagnostics()); }
   async run(): Promise<SpacesRuntimeDecision> {
     // An operation that already started owns its context until it settles.
     const state = this.#live();
-    const result = await state.execution.run(state.signal), snapshot = hex(result.snapshot.bytes);
+    // The execute window ends before optional export/check; those operations own separate
+    // diagnostic windows. Nightyard still times the complete public run() call.
+    const result = await diagnosticPreparedAsync("request-execute", () => state.execution.run(state.signal)), snapshot = hex(result.snapshot.bytes);
     if (result.completion.kind === "incomplete") return { kind: "unsupported", detail: result.completion.reason, outcome: result.outcome };
     if (result.completion.kind === "absent") return { kind: "forbidden", snapshot, outcome: result.outcome };
     const retained = result.witnesses[0];
     if (!retained) return { kind: "unsupported", detail: "The provider returned no retained support", outcome: result.outcome };
-    for (const extra of result.witnesses.slice(1)) extra.close();
+    for (const extra of result.witnesses.slice(1)) diagnosticPreparedSync("extra-witness-close", () => extra.close());
     const witness = new SpacesWitness(snapshot, retained, state.root, state.query, state.programs, state.authenticate);
     if (state.required) {
       let exported: SpacesExport;
@@ -142,9 +148,11 @@ class PreparedSpacesRequest implements SpacesPreparedRequest {
     return { kind: "permitted", snapshot, outcome: result.outcome, witness };
   }
   close(): void {
-    const state = this.#state;
-    this.#state = undefined;
-    state?.execution.close();
+    diagnosticPreparedSync("request-close", () => {
+      const state = this.#state;
+      this.#state = undefined;
+      state?.execution.close();
+    });
   }
 }
 
@@ -169,76 +177,76 @@ export class SpacesRuntime {
   }
 
   static async open(config: SpacesRuntimeConfig): Promise<SpacesRuntime> {
-    const diagnostic = beginRuntimeDiagnostic("create");
-    runtimeCheckpoint(diagnostic, "config-capture", "start");
-    config = { ...config, root: copyValue(config.root),
-      preparationBudget: Object.freeze({ ...config.preparationBudget }),
-      observationTemplates: (config.observationTemplates ?? []).map(template => ({ ...template,
-        clause: copyClause(template.clause), parameters: [...template.parameters] })) };
-    runtimeCheckpoint(diagnostic, "config-capture", "complete");
-    const base = runtimePhase(diagnostic, "source-capture", () => prepareSpacesProgram({
-      bundles: config.bundles, authenticate: config.authenticate, budget: config.preparationBudget }));
-    const anchor = inputLiteral(fact("root", config.root));
-    const profile: CheckProfile<undefined> = {
-      theory: new TermTheory(),
-      leaves: { extensional: () => PredicateSet.from(["root"]),
-        verify: claim => claim.equals(anchor) ? { kind: "admit" } : { kind: "reject", code: "unaccepted_premise" } },
-      admit: new AlwaysAdmit<undefined>(), limits: { ...checkLimits },
-    };
-    const captured: Omit<SpacesRuntimeConfig, "bundles"> = { root: config.root, authenticate: config.authenticate,
-      memoryLimitPages: config.memoryLimitPages, preparationBudget: Object.freeze({ ...config.preparationBudget }),
-      observationTemplates: Object.freeze((config.observationTemplates ?? []).map(t => Object.freeze({ ...t, parameters: Object.freeze([...t.parameters]) }))),
-      limits: config.limits && Object.freeze({ ...config.limits }) };
-    const factory = runtimePhase(diagnostic, "factory-create", () => WasmPreparedFactory.create({
-      checkProfile: profile, ctx: undefined, memoryLimitPages: config.memoryLimitPages,
-      templates: captured.observationTemplates, limits: captured.limits }));
-    // The defensive decoded graph has the same operation lifetime as the former
-    // inline Session.open argument; no diagnostic callback retains it afterwards.
-    const owner = (() => {
-      const program = runtimePhase(diagnostic, "native-program-decode", () => Program.fromLookup(base.nativeProgram()));
-      return runtimePhase(diagnostic, "session-open", () => Session.open(program, Bindings.empty().bind("root/1", [anchor]), Multiplicity.Set));
-    })();
-    runtimeCheckpoint(diagnostic, "owner-prepare", "start");
-    try {
-      const lease = await owner.prepare(diagnosticFactory(diagnostic, factory));
-      runtimeCheckpoint(diagnostic, "owner-prepare", "complete");
-      runtimeCheckpoint(diagnostic, "create", "complete");
-      return new SpacesRuntime({ config: captured, owner, factory, profile, base, lease });
-    } catch (error) {
-      runtimeFailure(diagnostic, "owner-prepare", error);
-      owner.close(); throw error;
-    }
+    return diagnosticPreparedAsync("create", async diagnostic => {
+      runtimeCheckpoint(diagnostic, "config-capture", "start");
+      config = { ...config, root: copyValue(config.root),
+        preparationBudget: Object.freeze({ ...config.preparationBudget }),
+        observationTemplates: (config.observationTemplates ?? []).map(template => ({ ...template,
+          clause: copyClause(template.clause), parameters: [...template.parameters] })) };
+      runtimeCheckpoint(diagnostic, "config-capture", "complete");
+      const base = runtimePhase(diagnostic, "source-capture", () => prepareSpacesProgram({
+        bundles: config.bundles, authenticate: config.authenticate, budget: config.preparationBudget }));
+      const anchor = inputLiteral(fact("root", config.root));
+      const profile: CheckProfile<undefined> = {
+        theory: new TermTheory(),
+        leaves: { extensional: () => PredicateSet.from(["root"]),
+          verify: claim => claim.equals(anchor) ? { kind: "admit" } : { kind: "reject", code: "unaccepted_premise" } },
+        admit: new AlwaysAdmit<undefined>(), limits: { ...checkLimits },
+      };
+      const captured: Omit<SpacesRuntimeConfig, "bundles"> = { root: config.root, authenticate: config.authenticate,
+        memoryLimitPages: config.memoryLimitPages, preparationBudget: Object.freeze({ ...config.preparationBudget }),
+        observationTemplates: Object.freeze((config.observationTemplates ?? []).map(t => Object.freeze({ ...t, parameters: Object.freeze([...t.parameters]) }))),
+        limits: config.limits && Object.freeze({ ...config.limits }) };
+      const factory = runtimePhase(diagnostic, "factory-create", () => WasmPreparedFactory.create({
+        checkProfile: profile, ctx: undefined, memoryLimitPages: config.memoryLimitPages,
+        templates: captured.observationTemplates, limits: captured.limits }));
+      // The defensive decoded graph has the same operation lifetime as the former
+      // inline Session.open argument; no diagnostic callback retains it afterwards.
+      const owner = (() => {
+        const program = runtimePhase(diagnostic, "native-program-decode", () => Program.fromLookup(base.nativeProgram()));
+        return runtimePhase(diagnostic, "session-open", () => Session.open(program, Bindings.empty().bind("root/1", [anchor]), Multiplicity.Set));
+      })();
+      runtimeCheckpoint(diagnostic, "owner-prepare", "start");
+      try {
+        const lease = await owner.prepare(diagnosticFactory(diagnostic, factory));
+        runtimeCheckpoint(diagnostic, "owner-prepare", "complete");
+        return new SpacesRuntime({ config: captured, owner, factory, profile, base, lease });
+      } catch (error) {
+        runtimeFailure(diagnostic, "owner-prepare", error);
+        owner.close(); throw error;
+      }
+    });
   }
 
   get baseIdentity(): string { return this.#baseIdentity; }
-  diagnostics(): PreparedViewDiagnostics { return this.#live().lease.diagnostics(); }
+  diagnostics(): PreparedViewDiagnostics { return diagnosticPreparedSync("runtime-diagnostics", () => this.#live().lease.diagnostics()); }
 
   /** Replacement is prepared before publication. Existing requests keep their old lease. */
   async replace(bundles: readonly SpaceFactsBundle[]): Promise<void> {
     const state = this.#live();
     if (this.#replacing) throw new PreparedSessionError("replacement_in_progress");
     this.#replacing = true;
-    const diagnostic = beginRuntimeDiagnostic("replace");
-    try {
-      const base = runtimePhase(diagnostic, "replacement-source-capture", () => prepareSpacesProgram({
-        bundles, authenticate: state.config.authenticate, budget: state.config.preparationBudget }));
-      const anchor = inputLiteral(fact("root", state.config.root));
-      const pending = (() => {
-        const program = runtimePhase(diagnostic, "replacement-native-program-decode", () => Program.fromLookup(base.nativeProgram()));
-        runtimeCheckpoint(diagnostic, "replacement-prepare", "start");
-        return state.owner.prepareReplacement(program, Bindings.empty().bind("root/1", [anchor]), diagnosticFactory(diagnostic, state.factory));
-      })();
-      const ticket = await pending;
-      runtimeCheckpoint(diagnostic, "replacement-prepare", "complete");
+    return diagnosticPreparedAsync("replace", async diagnostic => {
       try {
-        if (this.#state !== state) throw new PreparedSessionError("runtime_closed");
-        state.owner.publish(ticket);
-      } catch (error) { ticket.close(); throw error; }
-      const lease = state.owner.pin(), previous = state.lease;
-      state.base = base; state.lease = lease; this.#baseIdentity = base.identity;
-      previous.close();
-      runtimeCheckpoint(diagnostic, "replace", "complete");
-    } finally { this.#replacing = false; }
+        const base = runtimePhase(diagnostic, "replacement-source-capture", () => prepareSpacesProgram({
+          bundles, authenticate: state.config.authenticate, budget: state.config.preparationBudget }));
+        const anchor = inputLiteral(fact("root", state.config.root));
+        const pending = (() => {
+          const program = runtimePhase(diagnostic, "replacement-native-program-decode", () => Program.fromLookup(base.nativeProgram()));
+          runtimeCheckpoint(diagnostic, "replacement-prepare", "start");
+          return state.owner.prepareReplacement(program, Bindings.empty().bind("root/1", [anchor]), diagnosticFactory(diagnostic, state.factory));
+        })();
+        const ticket = await pending;
+        runtimeCheckpoint(diagnostic, "replacement-prepare", "complete");
+        try {
+          if (this.#state !== state) throw new PreparedSessionError("runtime_closed");
+          state.owner.publish(ticket);
+        } catch (error) { ticket.close(); throw error; }
+        const lease = state.owner.pin(), previous = state.lease;
+        state.base = base; state.lease = lease; this.#baseIdentity = base.identity;
+        previous.close();
+      } finally { this.#replacing = false; }
+    });
   }
 
   #portableSupport(state: RuntimeState, programs: readonly SpacesProgram[], budget?: CarryingBudget): CatalogSupportPolicy {
@@ -305,10 +313,12 @@ export class SpacesRuntime {
   }
 
   close(): void {
-    const state = this.#state;
-    this.#state = undefined;
-    if (!state) return;
-    try { state.lease.close(); } finally { state.owner.close(); }
+    diagnosticPreparedSync("runtime-close", () => {
+      const state = this.#state;
+      this.#state = undefined;
+      if (!state) return;
+      try { state.lease.close(); } finally { state.owner.close(); }
+    });
   }
 }
 

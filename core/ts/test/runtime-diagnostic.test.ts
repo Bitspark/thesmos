@@ -4,12 +4,19 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
-  Bindings, DatasetSnapshot, Multiplicity, PreparedQuery, PreparedViewLease, Program,
+  Bindings, DatasetSnapshot, Multiplicity, PreparedQuery, PreparedViewLease, Program, Session,
   type PreparedInputs, type PreparedRuntime, type PreparedViewFactory,
 } from "@bitspark/logos-kernel";
-import { diagnosticFactory, diagnosticRequest, runtimePhase } from "../src/runtime-diagnostic.js";
-import { atom, path } from "../src/index.js";
-import { createSpacesRuntime } from "../src/runtime.js";
+import { diagnosticFactory as factoryCheckpoints, diagnosticPreparedAsync, diagnosticPreparedSync, diagnosticRequest, runtimePhase } from "../src/runtime-diagnostic.js";
+import { atom, createSpacesVerifier, path } from "../src/index.js";
+import { createSpacesRuntime, type SpacesRuntimeDecision } from "../src/runtime.js";
+import { copyPreparedResourceRecord, type PreparedResourceRecord } from "../src/runtime-resource-observation.js";
+
+// Factory checkpointing runs inside the same explicit outer ownership scope used by
+// runtime creation/replacement. This fixture owns no input or returned runtime.
+function diagnosticFactory(id: number, factory: PreparedViewFactory): PreparedViewFactory {
+  return { prepare: input => diagnosticPreparedAsync("factory-control", () => factoryCheckpoints(id, factory).prepare(input)) };
+}
 
 test("failed diagnostic validation preserves successful results and original exceptions", () => {
   const previousMode = process.env.PREPARED_MEASUREMENT_MODE;
@@ -339,10 +346,16 @@ test("failed phase records bounded primitive causes without replacing the thrown
 const nativeHook = Symbol.for("logos.prepared.native-phase-diagnostic");
 const operationHook = Symbol.for("logos.prepared.operation-diagnostic");
 const factoryHook = Symbol.for("logos.prepared.factory.phase-diagnostic");
+const resourceHook = Symbol.for("logos.prepared.resource-observer");
+const resourceModeHook = Symbol.for("logos.prepared.resource-observer.mode");
+const resourceEnvironment = ["PREPARED_RESOURCE_OBSERVER_MODE", "PREPARED_OBSERVATION_CAPTURE_ID",
+  "PREPARED_OBSERVATION_CONFIGURATION_SHA256", "PREPARED_OBSERVATION_EXECUTION_CLASS"] as const;
 type RemoteControl = {
   records(): ReturnType<typeof JSON.parse>[];
+  resources(): ReturnType<typeof JSON.parse>[];
   failures(): ReturnType<typeof JSON.parse>[];
   receipt: string;
+  directory: string;
 };
 
 async function remoteControl(label: string, operation: (control: RemoteControl) => Promise<void>): Promise<void> {
@@ -365,7 +378,8 @@ async function remoteControl(label: string, operation: (control: RemoteControl) 
   const previousReceipt = process.env.PREPARED_BUILD_RECEIPT_SHA256;
   const previousExit = process.exitCode;
   const previousLog = console.log, previousError = console.error;
-  const descriptors = [nativeHook, operationHook, factoryHook].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  const priorResourceEnvironment = resourceEnvironment.map(name => [name, process.env[name]] as const);
+  const descriptors = [nativeHook, operationHook, factoryHook, resourceHook, resourceModeHook].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
   const readLines = (name: string) => {
     const file = join(directory, "prepared-spaces", name);
     return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
@@ -376,9 +390,17 @@ async function remoteControl(label: string, operation: (control: RemoteControl) 
     process.env.PREPARED_MEASUREMENT_MODE = "exploratory-current";
     const receipt = createHash("sha256").update(`request diagnostic unit control: ${label}`).digest("hex");
     process.env.PREPARED_BUILD_RECEIPT_SHA256 = receipt;
+    for (const name of resourceEnvironment) delete process.env[name];
+    // Only explicit resource controls opt in. These fixture identities bind the
+    // disposable unit records, never a measured process or authoritative build.
+    process.env.PREPARED_OBSERVATION_CAPTURE_ID = "10000000-0000-4000-8000-000000000001";
+    process.env.PREPARED_OBSERVATION_CONFIGURATION_SHA256 = createHash("sha256").update(`unit configuration: ${label}`).digest("hex");
+    process.env.PREPARED_OBSERVATION_EXECUTION_CLASS = "minimal-diagnostic";
+    Reflect.deleteProperty(globalThis, resourceHook); Reflect.deleteProperty(globalThis, resourceModeHook);
     console.log = () => {};
     console.error = () => {};
-    await operation({ records: () => readLines("runtime-phases.ndjson"), failures: () => readLines("runtime-diagnostic-failures.ndjson"), receipt });
+    await operation({ records: () => readLines("runtime-phases.ndjson"), resources: () => readLines("runtime-resources.ndjson"),
+      failures: () => readLines("runtime-diagnostic-failures.ndjson"), receipt, directory });
   } finally {
     try {
       for (const [key, descriptor] of descriptors) {
@@ -388,7 +410,7 @@ async function remoteControl(label: string, operation: (control: RemoteControl) 
     } finally {
       console.log = previousLog; console.error = previousError;
       for (const [name, value] of [["PREPARED_MEASUREMENT_MODE", previousMode], ["RUNNER_TEMP", previousTemporary],
-        ["PREPARED_BUILD_RECEIPT_SHA256", previousReceipt]] as const) {
+        ["PREPARED_BUILD_RECEIPT_SHA256", previousReceipt], ...priorResourceEnvironment] as const) {
         if (value === undefined) delete process.env[name]; else process.env[name] = value;
       }
       process.exitCode = previousExit;
@@ -441,7 +463,7 @@ test("operation sink serializes the exact remote grammar and refuses invalid pai
     assert.equal(records.length, 63);
     for (const record of records) {
       assert.equal(record.format, "thesmos/cold-runtime-phase/1");
-      assert.equal(record.edge, "observed"); assert.equal(record.activation, 700);
+      assert.equal(record.edge, "observed"); assert.equal(record.activation, records[0]!.activation);
       assert.equal(Object.hasOwn(record, "failure"), false);
       assert.equal(record.run, process.env.GITHUB_RUN_ID);
       assert.deepEqual(record.source, { logos: process.env.LOGOS_REVISION, thesmos: process.env.THESMOS_REVISION });
@@ -626,5 +648,272 @@ test("actual SpacesRuntime request keeps observations active through lease await
       requestMock.mock.restore(); admissionMock.mock.restore(); closeMock.mock.restore();
       try { runtime.close(); } catch (error) { if (!primaryFailed) throw error; }
     }
+  });
+});
+
+// This is a shape-only unit fixture, never a measured guest or candidate receipt.
+function resourceRecord(mode: "minimal" | "compiled-disabled" = "minimal"): PreparedResourceRecord {
+  const words = Array<number>(320).fill(0);
+  words[0] = 0x4c4d4f31; words[1] = 1; words[2] = 1280; words[4] = mode === "minimal" ? 1 : 0;
+  words[5] = 1; words[7] = 1280; words[26] = 15;
+  // Preserve the exact two words; the forwarding boundary never turns this u64
+  // into an imprecise Number or asserts that the unit fixture was observed.
+  words[32] = 0xffff_ffff; words[33] = 0xffff_ffff;
+  const snapshot = () => ({ status: mode === "minimal" ? "observed" as const : "disabled" as const,
+    reason: null, association: mode === "minimal" ? "accepted" as const : "disabled" as const,
+    memoryPages: 16, words: [...words], aggregateValid: mode === "minimal", associationValid: mode === "minimal" });
+  return {
+    schema: "logos/prepared-resource-observation/1", mode, searcher: 7, hostCall: 9, operation: "admit",
+    startedGeneration: 1, generation: 1, guestWindow: 3, clock: "performance.now", timeOriginMs: 1000,
+    startedAtMs: 2, finishedAtMs: 5,
+    guestIdentity: { status: "observed", sha256: "8".repeat(64), hashWallMs: 0.125 },
+    wire: { status: "observed", bytes: 128, sha256: "9".repeat(64), hashWallMs: 0.25 },
+    phase: "complete", outcome: "returned", encodingReturned: true, inputAllocation: true,
+    inputAllocationReturned: true, inputWritten: true, exportEntry: true, firstThrownExport: null,
+    exports: [{ export: "logos_prepared", ordinal: 11, outcome: "returned", args: [48, 128], startedAtMs: 3,
+      finishedAtMs: 4, before: snapshot(), after: snapshot() }],
+    droppedExports: 0, collectorValid: true, collectorWallMs: 0.5, instanceSetupWallMs: 0.1,
+  };
+}
+
+test("resource records copy exact fixed words and detached containers without conflating validity", () => {
+  const original = resourceRecord(), copied = copyPreparedResourceRecord(original);
+  assert.deepEqual(copied, original);
+  original.exports[0]!.after.words![32] = 0;
+  original.exports[0]!.args[0] = 0;
+  original.guestIdentity.sha256 = "a".repeat(64);
+  assert.equal(copied.exports[0]!.after.words![32], 0xffff_ffff);
+  assert.equal(copied.exports[0]!.after.words![33], 0xffff_ffff);
+  assert.deepEqual(copied.exports[0]!.args, [48, 128]);
+  assert.equal(copied.guestIdentity.sha256, "8".repeat(64));
+  for (const [status, reason] of [["unavailable", "missing-exports"], ["read-failed", "read-threw"],
+    ["invalid", "header"], ["partial", "publication"]] as const) {
+    const value = resourceRecord();
+    value.collectorValid = false;
+    value.exports[0]!.after = { status, reason, association: "not-requested", memoryPages: 4096,
+      words: null, aggregateValid: false, associationValid: false };
+    const detached = copyPreparedResourceRecord(value);
+    assert.deepEqual(detached, value);
+    assert.equal(detached.exports[0]!.after.memoryPages, 4096);
+    assert.equal(detached.collectorValid, false);
+  }
+  assert.deepEqual(copyPreparedResourceRecord(resourceRecord("compiled-disabled")), resourceRecord("compiled-disabled"));
+});
+
+test("resource record grammar rejects getters holes extra graphs and out-of-domain fields", () => {
+  const mutations: ((record: PreparedResourceRecord) => unknown)[] = [
+    value => ({ ...value, schema: "other" }), value => ({ ...value, operation: "source-capture" }),
+    value => ({ ...value, source: { secret: "must never serialize" } }),
+    value => ({ ...value, hostCall: NaN }), value => ({ ...value, generation: 0 }),
+    value => ({ ...value, outcome: "threw" }), value => ({ ...value, finishedAtMs: 1 }),
+    value => ({ ...value, wire: { ...value.wire, sha256: null } }),
+    value => ({ ...value, wire: { status: "not-observed", bytes: 1, sha256: null, hashWallMs: 0 } }),
+    value => ({ ...value, exports: Array(17).fill(value.exports[0]) }),
+    value => { value.exports[0]!.args.push(0, 0, 0); return value; },
+    value => { value.exports[0]!.after.words!.pop(); return value; },
+    value => { value.exports[0]!.after.words!.push(0); return value; },
+    value => { value.exports[0]!.after.words![0] = 0x1_0000_0000; return value; },
+    value => { Reflect.deleteProperty(value.exports[0]!.after.words!, "5"); return value; },
+    value => { value.exports[0]!.after.status = "partial"; return value; },
+    value => ({ ...value, exports: [{ ...value.exports[0], export: "logos_search" }] }),
+  ];
+  for (const mutate of mutations) assert.throws(() => copyPreparedResourceRecord(mutate(resourceRecord())), TypeError);
+  let invoked = 0;
+  for (const field of ["wire", "exports", "collectorWallMs"]) {
+    const value = resourceRecord();
+    Object.defineProperty(value, field, { get() { invoked++; throw new Error("No getters"); }, enumerable: true });
+    assert.throws(() => copyPreparedResourceRecord(value), TypeError);
+  }
+  const value = resourceRecord();
+  Object.defineProperty(value.exports[0]!.after.words!, "4", { get() { invoked++; return 0; } });
+  assert.throws(() => copyPreparedResourceRecord(value), TypeError);
+  assert.throws(() => copyPreparedResourceRecord({ ...resourceRecord(), toJSON() { invoked++; return {}; } }), TypeError);
+  assert.equal(invoked, 0);
+});
+
+test("resource scopes preserve absence exact descriptors overlap and thrown identity", async () => {
+  await remoteControl("resource ownership", async control => {
+    const returned = { same: "result" }, primary = new Error("original resource scope failure");
+    assert.equal(diagnosticPreparedSync("absent-control", () => {
+      assert.equal(Object.getOwnPropertyDescriptor(globalThis, resourceModeHook), undefined);
+      assert.equal(Object.getOwnPropertyDescriptor(globalThis, resourceHook), undefined);
+      return returned;
+    }), returned);
+    let foreignGetterCalls = 0;
+    Object.defineProperty(globalThis, resourceHook, {
+      configurable: true, get() { foreignGetterCalls++; throw new Error("Do not invoke a foreign absent-arm sink"); },
+    });
+    const foreign = Object.getOwnPropertyDescriptor(globalThis, resourceHook);
+    assert.equal(diagnosticPreparedSync("foreign-absent-control", () => returned), returned);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, resourceHook), foreign);
+    assert.equal(foreignGetterCalls, 0);
+    assert.ok(control.failures().some(record => record.phase === "resource-mode" && record.edge === "unexpected-descriptor"));
+    Reflect.deleteProperty(globalThis, resourceHook);
+    process.env.PREPARED_RESOURCE_OBSERVER_MODE = "minimal";
+    let getters = 0;
+    for (const key of [resourceHook, resourceModeHook]) Object.defineProperty(globalThis, key, {
+      get() { getters++; throw new Error("Do not call prior accessors"); }, configurable: true, enumerable: true,
+    });
+    const before = [resourceHook, resourceModeHook].map(key => Object.getOwnPropertyDescriptor(globalThis, key));
+    const gate = deferred<void>();
+    const pending = diagnosticPreparedAsync("resource-pending", async () => {
+      const held = sink(resourceHook);
+      assert.equal(Object.getOwnPropertyDescriptor(globalThis, resourceModeHook)?.value, "minimal");
+      assert.equal(diagnosticPreparedSync("reentrant-control", () => returned), returned);
+      assert.equal(sink(resourceHook), held);
+      await gate.promise;
+      held(resourceRecord());
+      throw primary;
+    });
+    const rejected = assert.rejects(pending, error => error === primary);
+    gate.resolve(); await rejected;
+    for (const [index, key] of [resourceHook, resourceModeHook].entries())
+      assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, key), before[index]);
+    assert.equal(getters, 0);
+    assert.equal(control.resources().length, 1);
+    assert.equal(control.resources()[0]!.lifecycle, "resource-pending");
+    assert.ok(control.failures().some(record => record.phase === "prepared-scope" && record.edge === "concurrent"));
+    const successor = () => {};
+    assert.throws(() => diagnosticPreparedSync("changed-resource-owner", () => {
+      Object.defineProperty(globalThis, resourceHook, { value: successor, configurable: true });
+      Object.defineProperty(globalThis, resourceModeHook, { value: "compiled-disabled", configurable: true });
+      throw primary;
+    }), error => error === primary);
+    assert.equal(Object.getOwnPropertyDescriptor(globalThis, resourceHook)?.value, successor);
+    assert.equal(Object.getOwnPropertyDescriptor(globalThis, resourceModeHook)?.value, "compiled-disabled");
+    assert.equal(process.exitCode, 1);
+  });
+});
+
+test("resource forwarding binds actual remote context and refuses malformed or unwritten records without changing results", async () => {
+  await remoteControl("resource envelope", async control => {
+    process.env.PREPARED_RESOURCE_OBSERVER_MODE = "minimal";
+    const same = { returned: true };
+    assert.equal(diagnosticPreparedSync("resource-roundtrip", () => {
+      const observe = sink(resourceHook), record = resourceRecord();
+      observe(record); record.exports[0]!.before.words![32] = 0;
+      observe({ ...resourceRecord(), mode: "compiled-disabled" });
+      observe(resourceRecord(), new Proxy({}, { get() { throw new Error("Extra args must stay unread"); } }));
+      return same;
+    }), same);
+    const [record] = control.resources();
+    assert.equal(control.resources().length, 1);
+    assert.equal(record.format, "thesmos/prepared-resource-observation/1");
+    assert.equal(record.run, process.env.GITHUB_RUN_ID); assert.equal(record.pid, process.pid);
+    assert.deepEqual(record.source, { logos: process.env.LOGOS_REVISION, thesmos: process.env.THESMOS_REVISION });
+    assert.equal(record.buildReceiptSha256, control.receipt);
+    assert.equal(record.captureId, process.env.PREPARED_OBSERVATION_CAPTURE_ID);
+    assert.equal(record.configurationSha256, process.env.PREPARED_OBSERVATION_CONFIGURATION_SHA256);
+    assert.equal(record.executionClass, "minimal-diagnostic");
+    assert.equal(record.timeOriginMs, performance.timeOrigin);
+    assert.deepEqual(record.observation, resourceRecord());
+    assert.ok(control.records().some(phase => phase.activation === record.activation && phase.phase === record.lifecycle));
+    assert.equal(control.failures().length, 2);
+    const original = new Error("ordinary exception while the collector cannot write");
+    const output = join(control.directory, "prepared-spaces", "runtime-resources.ndjson");
+    rmSync(output); mkdirSync(output);
+    assert.throws(() => diagnosticPreparedSync("unwritable-resource", () => {
+      try { sink(resourceHook)(resourceRecord()); throw original; }
+      finally { sink(operationHook)("close", "complete", "returned"); }
+    }), error => error === original);
+    assert.equal(control.failures().length, 3);
+    assert.ok(control.records().some(phase => phase.detail === "operation=close; transportPhase=complete; outcome=returned"));
+    assert.equal(process.exitCode, 1);
+  });
+});
+
+test("actual lifecycle forwards preparation execution replacement retained export and teardown resource records", async () => {
+  await remoteControl("actual resource lifecycle", async control => {
+    process.env.PREPARED_RESOURCE_OBSERVER_MODE = "minimal";
+    const root = atom("resource-root"), marker = "do-not-retain-query-graph-in-resource-records";
+    const query = { actor: root, statement: atom(marker), space: path() };
+    const runtime = await createSpacesRuntime({ root, bundles: [], authenticate: () => true,
+      preparationBudget: { maxBundles: 1, maxClauses: 1000, maxPayloadBytes: 1024 * 1024 } });
+    let request: Awaited<ReturnType<typeof runtime.request>> | undefined;
+    let result: SpacesRuntimeDecision | undefined;
+    try {
+      request = await runtime.request({ query, observations: [] });
+      result = await request.run();
+      assert.equal(result.kind, "permitted", result.kind === "unsupported" ? result.detail : undefined);
+      if (result.kind !== "permitted") throw new Error("The real root authority must produce a retained witness");
+      request.close(); request = undefined;
+      await runtime.replace([]);
+      runtime.close();
+      const exported = await result.witness.export();
+      assert.equal(exported.kind, "exported");
+      if (exported.kind !== "exported") throw new Error("The retained witness must export after owner retirement");
+      assert.equal(createSpacesVerifier({ root, authenticate: () => true }).verify({ query, proof: exported.proof }).permitted, true);
+      result.witness.close();
+      const resources = control.resources();
+      for (const [lifecycle, operation] of [["create", "program_open"], ["create", "base_open"],
+        ["request", "request_open"], ["request", "admit"], ["request-execute", "execute"],
+        ["request-close", "close"], ["replace", "program_open"], ["replace", "base_open"],
+        ["runtime-close", "close"], ["witness-export", "materialize"]])
+        assert.ok(resources.some(record => record.lifecycle === lifecycle && record.observation.operation === operation), `${lifecycle}/${operation}`);
+      for (const record of resources) {
+        assert.equal(record.observation.mode, "minimal");
+        assert.equal(record.observation.guestIdentity.status, "observed");
+        assert.match(record.observation.guestIdentity.sha256, /^[a-f0-9]{64}$/);
+        assert.ok(record.observation.exports.length > 0);
+        assert.ok(record.observation.exports.every((entry: { after: { status: string } }) => entry.after.status === "observed"));
+      }
+      assert.ok(new Set(resources.map(record => record.observation.searcher)).size >= 2);
+      const identities = resources.map(record => `${record.observation.searcher}/${record.observation.hostCall}`);
+      assert.equal(new Set(identities).size, identities.length);
+      assert.ok(control.records().some(record => record.phase === "witness-close" && record.edge === "complete"));
+      assert.equal(JSON.stringify(resources).includes(marker), false);
+      assert.equal(control.failures().length, 0);
+    } finally { request?.close(); if (result?.kind === "permitted") result.witness.close(); runtime.close(); }
+  });
+});
+
+test("actual Searcher creation distinguishes absent and compiled-disabled resource modes", async () => {
+  await remoteControl("actual resource modes", async control => {
+    const config = { root: atom("resource-mode-root"), bundles: [], authenticate: () => true,
+      preparationBudget: { maxBundles: 1, maxClauses: 1000, maxPayloadBytes: 1024 * 1024 } };
+    const absent = await createSpacesRuntime(config);
+    absent.close();
+    assert.equal(control.resources().length, 0);
+    assert.equal(Object.getOwnPropertyDescriptor(globalThis, resourceModeHook), undefined);
+    process.env.PREPARED_RESOURCE_OBSERVER_MODE = "compiled-disabled";
+    const disabled = await createSpacesRuntime(config);
+    disabled.close();
+    const records = control.resources();
+    assert.ok(records.length > 0);
+    for (const record of records) {
+      assert.equal(record.observation.mode, "compiled-disabled");
+      assert.ok(record.observation.exports.length > 0);
+      for (const entry of record.observation.exports) for (const snapshot of [entry.before, entry.after]) {
+        assert.equal(snapshot.status, "disabled");
+        assert.equal(snapshot.aggregateValid, false); assert.equal(snapshot.associationValid, false);
+        assert.equal(snapshot.words.length, 320);
+      }
+    }
+    assert.equal(control.failures().length, 0);
+  });
+});
+
+test("actual runtime close keeps both cleanup calls and the original error when resource collection fails", async t => {
+  await remoteControl("actual resource cleanup failure", async control => {
+    process.env.PREPARED_RESOURCE_OBSERVER_MODE = "minimal";
+    const runtime = await createSpacesRuntime({ root: atom("resource-cleanup-root"), bundles: [], authenticate: () => true,
+      preparationBudget: { maxBundles: 1, maxClauses: 1000, maxPayloadBytes: 1024 * 1024 } });
+    const primary = new Error("original lease-close failure"), calls: string[] = [];
+    const leaseClose = PreparedViewLease.prototype.close, ownerClose = Session.prototype.close;
+    // test-double: forwarding(real native cleanup runs first, then the first
+    // close reports its own error; the unchanged outer finally must close owner)
+    const leaseMock = t.mock.method(PreparedViewLease.prototype, "close", function (this: PreparedViewLease) {
+      calls.push("lease"); leaseClose.call(this); throw primary;
+    });
+    const ownerMock = t.mock.method(Session.prototype, "close", function (this: Session) { calls.push("owner"); ownerClose.call(this); });
+    try {
+      process.env.PREPARED_OBSERVATION_CONFIGURATION_SHA256 = "invalid unit configuration";
+      assert.throws(() => runtime.close(), error => error === primary);
+      assert.deepEqual(calls, ["lease", "owner"]);
+      assert.equal(control.failures().some(record => record.phase === "resource-sink"), true);
+      assert.equal(process.exitCode, 1);
+      assert.doesNotThrow(() => runtime.close());
+      assert.deepEqual(calls, ["lease", "owner"]);
+    } finally { leaseMock.mock.restore(); ownerMock.mock.restore(); runtime.close(); }
   });
 });
