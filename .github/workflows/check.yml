@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: node scripts/check-frozen.mjs && node scripts/check-links.mjs && git diff --check
+      - run: node --test scripts/package-dependencies.test.mjs && node scripts/check-frozen.mjs && node scripts/check-links.mjs && git diff --check
   sdk:
     # Private Logos packages are available only to maintained repository code.
     # External PRs receive the public source checks, pending dependency publication.
@@ -46,6 +46,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGE_READ_TOKEN }}
       - run: npm run check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: thesmos-candidate-dependencies
+          path: .build-artifacts/candidate-dependencies.json
+          include-hidden-files: true
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: thesmos-package

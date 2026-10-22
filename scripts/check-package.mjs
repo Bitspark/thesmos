@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { archiveManifest, candidateConsumer, fileIdentity, inspectCandidateLock, installedOntosIdentity,
+  LOGOS_NAMES, ONTOS_NAMES, PUBLIC_REGISTRY, publishedMetadata } from "./package-dependencies.mjs";
 
 // An actual packed consumer catches missing law assets and broken package exports.
 const npm = (args, cwd) => process.platform === "win32"
@@ -42,10 +44,49 @@ const candidate = [process.env.THESMOS_CANDIDATE_LOGOS_CONTRACT, process.env.THE
 let testedDependencies = { kind: "published", ...publishedDependencies };
 if (candidate.some(Boolean)) {
   assert(candidate.every(Boolean) && /^[a-f0-9]{40}$/.test(process.env.LOGOS_REVISION ?? ""), "Candidate packages require an exact paired source pin");
-  testedDependencies = { kind: "candidate", logosSource: process.env.LOGOS_REVISION, baseline: publishedDependencies,
-    packages: Object.fromEntries(["@bitspark/logos-contract", "@bitspark/logos-kernel"].map((name, index) =>
-      [name, { sha256: createHash("sha256").update(readFileSync(candidate[index])).digest("hex") }])) };
-  npm(["install", "--offline", "--ignore-scripts", "--allow-remote=all", "--no-audit", "--no-save", ...candidate], directory);
+  mkdirSync(".build-artifacts", { recursive: true });
+  const receipt = { format: "thesmos/candidate-dependencies/1", kind: "candidate", status: "incomplete", phase: "archive-inspection",
+    logosSource: process.env.LOGOS_REVISION, thesmosSource: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    run: process.env.GITHUB_RUN_ID ?? null, baseline: publishedDependencies, archive: fileIdentity(join(directory, pack.filename)),
+    sourceManifestSha256: fileIdentity("package.json").sha256,
+    helperSha256: fileIdentity("scripts/package-dependencies.mjs").sha256 };
+  try {
+    const paths = Object.fromEntries(LOGOS_NAMES.map((name, index) => [name, resolve(candidate[index])]));
+    const archives = Object.fromEntries(LOGOS_NAMES.map(name => [name, archiveManifest(paths[name])]));
+    receipt.packages = archives;
+    const before = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+    const { consumer: selected, cohort } = candidateConsumer(before, archives, paths);
+    receipt.cohort = cohort;
+    receipt.phase = "public-artifact-preparation";
+    const published = {};
+    for (const name of ONTOS_NAMES) {
+      const metadata = JSON.parse(npm(["view", `${name}@${cohort.ontosVersion}`, "--json", "--registry=" + PUBLIC_REGISTRY,
+        "--@bitspark:registry=" + PUBLIC_REGISTRY], directory));
+      published[name] = publishedMetadata(metadata, name, cohort.ontosVersion);
+      // Prepare actual immutable public artifacts before the offline installation.
+      npm(["cache", "add", published[name].tarball, "--ignore-scripts", "--allow-remote=all",
+        "--registry=" + PUBLIC_REGISTRY, "--@bitspark:registry=" + PUBLIC_REGISTRY], directory);
+    }
+    receipt.publicPackages = published;
+    receipt.consumerManifest = { before, after: selected };
+    writeFileSync(join(directory, "package.json"), JSON.stringify(selected, null, 2) + "\n");
+    receipt.consumerManifest.sha256 = fileIdentity(join(directory, "package.json")).sha256;
+    receipt.phase = "offline-candidate-installation";
+    npm(["install", "--offline", "--ignore-scripts", "--allow-remote=all", "--allow-file=all", "--no-audit", "--no-fund",
+      "--registry=" + PUBLIC_REGISTRY, "--@bitspark:registry=" + PUBLIC_REGISTRY], directory);
+    receipt.phase = "installed-cohort-verification";
+    receipt.resolutions = inspectCandidateLock(JSON.parse(readFileSync(join(directory, "package-lock.json"), "utf8")), archives, published);
+    receipt.consumerLockSha256 = fileIdentity(join(directory, "package-lock.json")).sha256;
+    receipt.installedIdentity = await installedOntosIdentity(directory, cohort.ontosVersion);
+    receipt.status = "installed";
+    receipt.phase = "complete";
+    testedDependencies = receipt;
+  } catch (error) {
+    receipt.failure = { name: error.name, detail: error.message };
+    throw error;
+  } finally {
+    writeFileSync(join(".build-artifacts", "candidate-dependencies.json"), JSON.stringify(receipt, null, 2) + "\n");
+  }
 }
 writeFileSync(join(directory, "check.mjs"), `
 import { strict as assert } from 'node:assert';

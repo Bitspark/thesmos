@@ -26,6 +26,20 @@ committed lock digest and resolved package integrity entries. A receipt with
 it is source qualification evidence and cannot qualify the declared released
 dependencies for publication.
 
+Candidate package checks inspect both actual Logos archive manifests and require
+their exact, reviewed Ontos 0.15.0 cohort. The original Thesmos archive and its
+committed published lock remain unchanged. After installing that baseline, the
+isolated consumer records explicit candidate-only overrides for the two Logos
+archives and the three public Ontos packages. Public metadata and tarballs are
+cached first; installation and all existing packed-consumer assertions remain
+offline. The gate rejects unknown, split or nested cohorts, then compares actual
+module namespaces and core value classes from the installed package graph.
+`candidate-dependencies.json` binds the original declarations, every consumer
+manifest change, archive and public artifact identities, final lock and installed
+identity. It retains an incomplete phase on failure. These overrides never enter
+the released manifest or authorize publication; released consumption still uses
+the ordinary committed lock with `testedDependencies.kind: published`.
+
 Release notes record the checks, dependency access requirement, frozen-law
 identity and any measured limits. A runtime release is distinct from the
 production adoption decision in issue 19. Consumers advance their released

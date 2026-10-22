@@ -20,7 +20,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test dist/core/ts/test/*.test.js",
     "law:check": "node scripts/compile-law.ts --check && node scripts/check-frozen.mjs",
-    "check": "npm run law:check && npm test && npm run example && node scripts/check-package.mjs && node scripts/check-links.mjs && git diff --check",
+    "check": "node --test scripts/package-dependencies.test.mjs && npm run law:check && npm test && npm run example && node scripts/check-package.mjs && node scripts/check-links.mjs && git diff --check",
     "example": "node dist/examples/document-service.js && node dist/examples/device-service.js && node dist/examples/account-principals.js",
     "prepack": "npm run build"
   },
