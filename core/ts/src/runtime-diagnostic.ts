@@ -7,6 +7,8 @@ import type { PreparedViewFactory } from "@bitspark/logos-kernel";
 
 let sequence = 0;
 let activation = 0;
+let activePreparedScope: number | undefined;
+const noSink = () => {};
 type DiagnosticEdge = "start" | "complete" | "failed" | "observed" | "unavailable" | "read-failed" | "invalid";
 type FailureSnapshot = {
   kind: "object" | "primitive" | "uninspectable" | "cycle" | "depth-limit";
@@ -55,7 +57,7 @@ export function runtimeFailure(id: number, phase: string, error: unknown): void 
   catch { diagnosticFailure(id, phase, "failed"); }
 }
 
-export function beginRuntimeDiagnostic(operation: "create" | "replace"): number {
+export function beginRuntimeDiagnostic(operation: "create" | "replace" | "request"): number {
   const id = ++activation;
   runtimeCheckpoint(id, operation, "start");
   return id;
@@ -77,6 +79,27 @@ function diagnosticFailure(id: number, phase: string, edge: string): void {
     const marker = JSON.stringify({ format: "thesmos/cold-runtime-diagnostic-failure/1", activation: id, phase, edge });
     try { appendFileSync(join(process.env.RUNNER_TEMP ?? ".", "prepared-spaces", "runtime-diagnostic-failures.ndjson"), marker + "\n"); } catch { /* exit status remains failed */ }
     try { console.error(marker); } catch { /* exit status remains failed */ }
+}
+
+// A global sink cannot distinguish interleaved asynchronous owners. Reject the
+// telemetry, without refusing the product operation or stealing an active sink.
+function claimPreparedScope(id: number): boolean {
+  if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return false;
+  if (activePreparedScope !== undefined) {
+    diagnosticFailure(id, "prepared-scope", "concurrent");
+    return false;
+  }
+  activePreparedScope = id;
+  return true;
+}
+
+function releasePreparedScope(id: number, owned: boolean): void {
+  if (!owned) return;
+  if (activePreparedScope !== id) {
+    diagnosticFailure(id, "prepared-scope", "ownership-changed");
+    return;
+  }
+  activePreparedScope = undefined;
 }
 
 function installFactorySink(id: number): () => void {
@@ -119,12 +142,18 @@ const nativePhaseLabels = [
   "program-reply", "reply-encode", "complete",
   "base-payload", "base-bindings", "base-options", "base-session-open",
   "base-prepare", "base-snapshot", "base-publication", "base-reply",
+  "request-payload", "request-bindings", "request-facts", "request-fragments",
+  "request-instantiate", "request-effective", "request-snapshot-limits", "request-publication", "request-reply",
+  "admit-payload", "admit-options", "admit-prepare", "admit-engine", "admit-result",
+  "admit-manifest", "admit-manifest-copy", "admit-publication", "admit-reply",
 ] as const;
 
 function installNativeSink(id: number): () => void {
   if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return () => {};
-  // A separate private hook observes the last scalar stage after trapped-call
-  // cleanup. This is neither a start/end event nor a stage duration measurement.
+  // A separate private hook observes the last scalar stored on the exact trapped
+  // instance after cleanup. There is no per-call nonce: a trap before ENTRY may
+  // leave an earlier call's store. This is neither current-call entry proof nor
+  // a start/end event or stage duration measurement.
   const key = Symbol.for("logos.prepared.native-phase-diagnostic");
   const sink = (status: unknown, phase: unknown) => {
     if (status === "observed") {
@@ -158,6 +187,62 @@ function installNativeSink(id: number): () => void {
       else if (!Reflect.deleteProperty(globalThis, key)) throw new Error("Native diagnostic sink could not be removed");
     } catch { diagnosticFailure(id, "native-sink", "restore-failed"); }
   };
+}
+
+const preparedOperations = ["program_open", "base_open", "request_open", "admit", "execute", "materialize", "close", "diagnostics", "unknown"];
+const preparedPhases = ["guards", "encode", "post-encode-guards", "input-buffer", "export-call", "reply", "complete"];
+
+function installOperationSink(id: number): () => void {
+  if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return () => {};
+  const key = Symbol.for("logos.prepared.operation-diagnostic");
+  // Only primitive labels and the numeric activation cross this private hook.
+  const sink = function (operation: unknown, phase: unknown, outcome: unknown) {
+    if (arguments.length !== 3 || typeof operation !== "string" || !preparedOperations.includes(operation) ||
+        typeof phase !== "string" || !preparedPhases.includes(phase) ||
+        (phase === "complete" ? outcome !== "returned" : outcome !== "threw")) {
+      diagnosticFailure(id, "operation-sink", "invalid-event");
+      return;
+    }
+    runtimeCheckpoint(id, "logos-prepared-operation", "observed", `operation=${operation}; transportPhase=${phase}; outcome=${outcome}`);
+  };
+  let previous: PropertyDescriptor | undefined;
+  let installed = false;
+  try {
+    previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value: sink, writable: true, configurable: true });
+    installed = true;
+  } catch { diagnosticFailure(id, "operation-sink", "install-failed"); }
+  return () => {
+    if (!installed) return;
+    try {
+      const current = Object.getOwnPropertyDescriptor(globalThis, key);
+      if (current?.value !== sink) {
+        diagnosticFailure(id, "operation-sink", "ownership-changed");
+        return;
+      }
+      if (previous) Object.defineProperty(globalThis, key, previous);
+      else if (!Reflect.deleteProperty(globalThis, key)) throw new Error("Operation diagnostic sink could not be removed");
+    } catch { diagnosticFailure(id, "operation-sink", "restore-failed"); }
+  };
+}
+
+/** Keep both sinks active through the actual request and its product cleanup. */
+export async function diagnosticRequest<T>(operation: () => Promise<T>): Promise<T> {
+  const id = beginRuntimeDiagnostic("request");
+  const owned = claimPreparedScope(id);
+  const restoreNative = owned ? installNativeSink(id) : noSink;
+  const restoreOperation = owned ? installOperationSink(id) : noSink;
+  try {
+    const result = await operation();
+    runtimeCheckpoint(id, "request", "complete");
+    return result;
+  } catch (error) {
+    runtimeFailure(id, "request", error);
+    throw error;
+  } finally {
+    try { restoreOperation(); }
+    finally { try { restoreNative(); } finally { releasePreparedScope(id, owned); } }
+  }
 }
 
 function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail?: string, failure?: FailureSnapshot): void {
@@ -198,8 +283,10 @@ export function runtimePhase<T>(id: number, phase: string, operation: () => T): 
 export function diagnosticFactory(id: number, factory: PreparedViewFactory): PreparedViewFactory {
   return {
     async prepare(input) {
-      const restoreSink = installFactorySink(id);
-      const restoreNativeSink = installNativeSink(id);
+      const owned = claimPreparedScope(id);
+      const restoreSink = owned ? installFactorySink(id) : noSink;
+      const restoreNativeSink = owned ? installNativeSink(id) : noSink;
+      const restoreOperationSink = owned ? installOperationSink(id) : noSink;
       runtimeCheckpoint(id, "factory-prepare", "start");
       try {
         // Invoke the actual receiver; the wrapper owns neither the input nor the
@@ -210,7 +297,13 @@ export function diagnosticFactory(id: number, factory: PreparedViewFactory): Pre
       } catch (error) {
         runtimeFailure(id, "factory-prepare", error);
         throw error;
-      } finally { restoreNativeSink(); restoreSink(); }
+      } finally {
+        try { restoreOperationSink(); }
+        finally {
+          try { restoreNativeSink(); }
+          finally { try { restoreSink(); } finally { releasePreparedScope(id, owned); } }
+        }
+      }
     },
   };
 }

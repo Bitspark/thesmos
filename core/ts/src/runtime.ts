@@ -20,7 +20,7 @@ import {
 } from "./runtime-source.js";
 export { instantiateSpacesObservations } from "./runtime-fragments.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
-import { beginRuntimeDiagnostic, diagnosticFactory, runtimeCheckpoint, runtimeFailure, runtimePhase } from "./runtime-diagnostic.js";
+import { beginRuntimeDiagnostic, diagnosticFactory, diagnosticRequest, runtimeCheckpoint, runtimeFailure, runtimePhase } from "./runtime-diagnostic.js";
 
 export {
   exportSpacesProof, portableEnvelopeReserve, PreparationRefused, prepareSpacesOverlay, prepareSpacesProgram, SpacesProgram,
@@ -276,20 +276,22 @@ export class SpacesRuntime {
   }
 
   async request(request: SpacesRequestOptions): Promise<SpacesPreparedRequest> {
-    const state = this.#live(), { base, lease, config } = state;
-    const query = Object.freeze({ actor: copyValue(request.query.actor), space: copyValue(request.query.space), statement: copyValue(request.query.statement) });
-    const carryingBudget = request.carryingBudget && Object.freeze({ ...request.carryingBudget });
-    const required = request.portable === "required", signal = request.signal;
-    const overlay = prepareSpacesOverlay({ bundles: request.observations, authenticate: config.authenticate, budget: config.preparationBudget });
-    const execution: PreparedQuery = await lease.request({ goal: inputLiteral(authorization(query.actor, query.statement, query.space)).toGoal(),
-      fragments: instantiateSpacesObservations(overlay, config.observationTemplates ?? []), limits: config.limits,
-      support: required ? this.#portableSupport(state, [base, overlay], carryingBudget) : { kind: "local" },
-      evidence: required ? { policy: "generate", retention: "retain", verify: { kind: "every" } }
-        : { policy: "none", retention: "discard", verify: { kind: "none" } }, witnessCapture: "retain" });
-    try {
-      return new PreparedSpacesRequest({ execution, admission: execution.admission(), root: config.root, query,
-        programs: [base, overlay], authenticate: config.authenticate, required, carryingBudget, signal });
-    } catch (error) { execution.close(); throw error; }
+    return diagnosticRequest(async () => {
+      const state = this.#live(), { base, lease, config } = state;
+      const query = Object.freeze({ actor: copyValue(request.query.actor), space: copyValue(request.query.space), statement: copyValue(request.query.statement) });
+      const carryingBudget = request.carryingBudget && Object.freeze({ ...request.carryingBudget });
+      const required = request.portable === "required", signal = request.signal;
+      const overlay = prepareSpacesOverlay({ bundles: request.observations, authenticate: config.authenticate, budget: config.preparationBudget });
+      const execution: PreparedQuery = await lease.request({ goal: inputLiteral(authorization(query.actor, query.statement, query.space)).toGoal(),
+        fragments: instantiateSpacesObservations(overlay, config.observationTemplates ?? []), limits: config.limits,
+        support: required ? this.#portableSupport(state, [base, overlay], carryingBudget) : { kind: "local" },
+        evidence: required ? { policy: "generate", retention: "retain", verify: { kind: "every" } }
+          : { policy: "none", retention: "discard", verify: { kind: "none" } }, witnessCapture: "retain" });
+      try {
+        return new PreparedSpacesRequest({ execution, admission: execution.admission(), root: config.root, query,
+          programs: [base, overlay], authenticate: config.authenticate, required, carryingBudget, signal });
+      } catch (error) { execution.close(); throw error; }
+    });
   }
 
   async decide(request: SpacesRequestOptions): Promise<SpacesRuntimeDecision> {
