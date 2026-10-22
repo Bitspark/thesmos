@@ -1,15 +1,34 @@
 # Temporary cold runtime diagnostic
 
-The `runtime-base-phase-diagnostic` branch is an auxiliary diagnostic, based on
-the earlier temporary source `8e67585aa9a4b20ea5461f615eae17654a05e1ab` and the
-reviewed product runtime at `70d778fbd8bb90029761ed79768d1f49be7053c3`. It must not be
-merged or published as a product change. The frozen law and authority adapter
-are unchanged.
+The `runtime-base-incremental-diagnostic` branch is an auxiliary diagnostic,
+composing temporary source `49c9c5316686a49135d2fed909505efdba90737c` with the
+reviewed incremental source capture from product commit
+`db0766e68c07dd780df93895ea7dc1e321b9a687`. It must not be merged or published as a
+product change. The frozen law and authority adapter are unchanged.
+
+The source-capture implementation, five acquisition controls and runtime
+documentation are byte-identical to that product commit. The runtime phase
+hooks, primitive failure writer and six Thesmos diagnostic controls remain
+byte-identical to `49c9c531`. The paired Logos source must include the contract
+capture API from `15b950e3b7d827b13af754e6ddb6bc88376769c9` and retain its existing
+three factory and five native-phase host controls. The ordinary candidate
+package check in run `39794197694` passed all 116 core cases, including the five
+acquisition controls, against product Logos `2c248515`; it does not validate
+this temporary composition or establish memory fit.
+
+The preceding native-only probe `39795344738`, using Thesmos `49c9c531` and
+Logos `01ce03c3ca11643fe480b11d9bc1856df3fd35a4`, completed program and base
+preparation, then aborted with V8 heap exhaustion after its first
+`request-admission-start` checkpoint. It recorded zero of 100 request results.
+That immutable failure remains separate from the next combined-source probe.
+The composition changes no heap, guest ceiling, budget, request denominator or
+diagnostic event grammar; its remote controls and actual execution remain
+pending.
 
 The diagnostic includes the separately reviewed encoded-source replacement from
 product commit `d8b98c478e0af9b853d09a373c1296f80ab75243` and its strengthened
-mutation control `70d778fbd8bb90029761ed79768d1f49be7053c3`. Only those product
-changes were cherry-picked into this diagnostic branch. Earlier probe artifacts
+mutation control `70d778fbd8bb90029761ed79768d1f49be7053c3`. Those product changes
+formed the earlier encoded-source diagnostic. Earlier probe artifacts
 continue to identify their earlier source; they are not measurements of this
 storage change. Probe `39679135506` measured this composite at diagnostic source
 `4d081bbe8b93a22369e259370af1014a9ed65778` and Logos
