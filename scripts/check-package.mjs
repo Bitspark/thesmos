@@ -48,9 +48,11 @@ if (candidate.some(Boolean)) {
   const receipt = { format: "thesmos/candidate-dependencies/1", kind: "candidate", status: "incomplete", phase: "archive-inspection",
     logosSource: process.env.LOGOS_REVISION, thesmosSource: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     run: process.env.GITHUB_RUN_ID ?? null, baseline: publishedDependencies, archive: fileIdentity(join(directory, pack.filename)),
+    node: process.version, npm: npm(["--version"], process.cwd()).trim(),
     sourceManifestSha256: fileIdentity("package.json").sha256,
     helperSha256: fileIdentity("scripts/package-dependencies.mjs").sha256 };
   try {
+    assert.equal(receipt.npm, "11.19.1", "Candidate override semantics require the reviewed npm writer");
     const paths = Object.fromEntries(LOGOS_NAMES.map((name, index) => [name, resolve(candidate[index])]));
     const archives = Object.fromEntries(LOGOS_NAMES.map(name => [name, archiveManifest(paths[name])]));
     receipt.packages = archives;

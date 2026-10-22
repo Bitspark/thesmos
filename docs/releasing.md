@@ -7,11 +7,23 @@ installation; an authenticated archive check does not establish that condition.
 
 When advancing logos, first wait for its family release and the required runtime
 qualification. Dispatch `check.yml` on the task branch with operation
-`refresh-dependencies`, the exact published `logos_version` and the intended
-`package_version`. This job resolves only published packages and produces an
+`refresh-dependencies`, the exact published `logos_version`, its `ontos_version`
+and the intended `package_version`. This job resolves only published packages and produces an
 input-revision-bound patch and receipt. It neither commits nor publishes. Verify
 the receipt and patch digest, apply the patch in the task worktree, update the
 release explanation, and commit. Dependency preparation runs on the GitHub runner.
+
+The refresh uses Node 24.22.0 and npm 11.19.1. It reads exact Logos metadata from
+GitHub Packages and exact Ontos metadata from the public registry. Temporary
+installer declarations use only the verified Logos tarball URLs while the public
+scope resolves Ontos. After npm writes their resolutions, the intended exact
+version declarations are restored and npm reconciles the lock offline. Every
+non-root resolution must remain byte-for-byte equivalent between those two npm
+phases; unrelated packages, nested cohorts and integrity changes are refused.
+No lock integrity or resolved URL is fabricated. On a resolver failure, the
+retained patch restores the intended version declarations and the receipt remains
+incomplete. Only a successful source patch followed by the full check can advance
+released consumption.
 
 Require the ordinary complete `check` workflow on that committed revision, without
 candidate archive overrides, and an independent review before squash merging.
