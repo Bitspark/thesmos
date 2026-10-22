@@ -7,6 +7,7 @@ import type { PreparedViewFactory } from "@bitspark/logos-kernel";
 
 let sequence = 0;
 let activation = 0;
+type DiagnosticEdge = "start" | "complete" | "failed" | "observed" | "unavailable" | "read-failed" | "invalid";
 
 export function beginRuntimeDiagnostic(operation: "create" | "replace"): number {
   const id = ++activation;
@@ -14,7 +15,7 @@ export function beginRuntimeDiagnostic(operation: "create" | "replace"): number 
   return id;
 }
 
-export function runtimeCheckpoint(id: number, phase: string, edge: "start" | "complete" | "failed", detail?: string): void {
+export function runtimeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail?: string): void {
   // Only the explicit remote exploratory process writes these records. Normal
   // package checks on this diagnostic source retain the ordinary runtime path.
   if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return;
@@ -66,7 +67,52 @@ function installFactorySink(id: number): () => void {
   };
 }
 
-function writeCheckpoint(id: number, phase: string, edge: "start" | "complete" | "failed", detail?: string): void {
+const nativePhaseLabels = [
+  "not-entered", "entry", "wire-decode", "envelope-read", "program-parse",
+  "envelope-drop", "rule-copy", "compile-index", "program-digest", "publication",
+  "program-reply", "reply-encode", "complete",
+] as const;
+
+function installNativeSink(id: number): () => void {
+  if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return () => {};
+  // A separate private hook observes the last scalar stage after trapped-call
+  // cleanup. This is neither a start/end event nor a stage duration measurement.
+  const key = Symbol.for("logos.prepared.native-phase-diagnostic");
+  const sink = (status: unknown, phase: unknown) => {
+    if (status === "observed") {
+      if (typeof phase !== "number" || !Number.isInteger(phase) || phase < 0 || phase >= nativePhaseLabels.length) {
+        diagnosticFailure(id, "native-sink", "invalid-event");
+        return;
+      }
+      runtimeCheckpoint(id, "logos-native-prepared", status, `phaseCode=${phase}; phaseLabel=${nativePhaseLabels[phase]}`);
+    } else if ((status === "unavailable" || status === "read-failed" || status === "invalid") && phase === undefined) {
+      runtimeCheckpoint(id, "logos-native-prepared", status);
+    } else {
+      diagnosticFailure(id, "native-sink", "invalid-event");
+    }
+  };
+  let previous: PropertyDescriptor | undefined;
+  let installed = false;
+  try {
+    previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value: sink, writable: true, configurable: true });
+    installed = true;
+  } catch { diagnosticFailure(id, "native-sink", "install-failed"); }
+  return () => {
+    if (!installed) return;
+    try {
+      const current = Object.getOwnPropertyDescriptor(globalThis, key);
+      if (current?.value !== sink) {
+        diagnosticFailure(id, "native-sink", "ownership-changed");
+        return;
+      }
+      if (previous) Object.defineProperty(globalThis, key, previous);
+      else if (!Reflect.deleteProperty(globalThis, key)) throw new Error("Native diagnostic sink could not be removed");
+    } catch { diagnosticFailure(id, "native-sink", "restore-failed"); }
+  };
+}
+
+function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail?: string): void {
   if (process.env.GITHUB_ACTIONS !== "true" || !process.env.RUNNER_TEMP ||
       !/^\d+$/.test(process.env.GITHUB_RUN_ID ?? "") || !process.env.GITHUB_EVENT_PATH ||
       JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")).inputs?.mode !== "profile-current" ||
@@ -104,6 +150,7 @@ export function diagnosticFactory(id: number, factory: PreparedViewFactory): Pre
   return {
     async prepare(input) {
       const restoreSink = installFactorySink(id);
+      const restoreNativeSink = installNativeSink(id);
       runtimeCheckpoint(id, "factory-prepare", "start");
       try {
         // Invoke the actual receiver; the wrapper owns neither the input nor the
@@ -114,7 +161,7 @@ export function diagnosticFactory(id: number, factory: PreparedViewFactory): Pre
       } catch (error) {
         runtimeCheckpoint(id, "factory-prepare", "failed", "Factory preparation threw; its original exception is preserved");
         throw error;
-      } finally { restoreSink(); }
+      } finally { restoreNativeSink(); restoreSink(); }
     },
   };
 }

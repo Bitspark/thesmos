@@ -127,3 +127,60 @@ test("temporary factory sink restores its exact descriptor and never overwrites 
     process.exitCode = previousExit;
   }
 });
+
+test("native phase observations validate only scalar stages and preserve errors and sink ownership", async () => {
+  const key = Symbol.for("logos.prepared.native-phase-diagnostic");
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+  const previousMode = process.env.PREPARED_MEASUREMENT_MODE;
+  const previousEvent = process.env.GITHUB_EVENT_PATH;
+  const previousTemporary = process.env.RUNNER_TEMP;
+  const previousExit = process.exitCode;
+  const previousConsoleError = console.error;
+  const markers: { phase: string; edge: string }[] = [];
+  try {
+    process.env.PREPARED_MEASUREMENT_MODE = "exploratory-current";
+    delete process.env.GITHUB_EVENT_PATH;
+    process.env.RUNNER_TEMP = "/dev/null/not-a-directory";
+    console.error = (value: unknown) => { markers.push(JSON.parse(String(value))); };
+    Object.defineProperty(globalThis, key, { get() { throw new Error("The native observer must not invoke a previous getter"); }, configurable: true, enumerable: true });
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    const input: PreparedInputs = { snapshot: DatasetSnapshot.resolve(Program.empty(), Bindings.empty()), multiplicity: Multiplicity.Set };
+    const runtime: PreparedRuntime = { async request() { throw new Error("No request in this control"); }, close() {} };
+    const factory: PreparedViewFactory = { async prepare(received) {
+      assert.equal(this, factory);
+      assert.equal(received, input);
+      const sink = Object.getOwnPropertyDescriptor(globalThis, key)?.value as (status: unknown, phase?: unknown) => void;
+      assert.equal(typeof sink, "function");
+      for (let phase = 0; phase <= 12; phase++) sink("observed", phase);
+      for (const status of ["unavailable", "read-failed", "invalid"]) sink(status);
+      assert.equal(markers.filter(marker => marker.phase === "logos-native-prepared" && marker.edge === "observed").length, 13);
+      assert.deepEqual(markers.filter(marker => marker.phase === "logos-native-prepared" && marker.edge !== "observed").map(marker => marker.edge), ["unavailable", "read-failed", "invalid"]);
+      for (const [status, phase] of [["observed", -1], ["observed", 13], ["observed", 0.5], ["observed", "4"], ["observed", undefined], ["unavailable", 4], ["unknown", undefined]]) sink(status, phase);
+      assert.equal(markers.filter(marker => marker.phase === "native-sink" && marker.edge === "invalid-event").length, 7);
+      return runtime;
+    } };
+    assert.equal(await diagnosticFactory(7, factory).prepare(input), runtime);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, key), previous);
+    const rejection = new Error("original trapped factory rejection");
+    await assert.rejects(diagnosticFactory(8, { async prepare() { throw rejection; } }).prepare(input), error => error === rejection);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, key), previous);
+    const anotherOwner = () => {};
+    const changed: PreparedViewFactory = { async prepare() {
+      Object.defineProperty(globalThis, key, { value: anotherOwner, configurable: true });
+      return runtime;
+    } };
+    assert.equal(await diagnosticFactory(9, changed).prepare(input), runtime);
+    assert.equal(Object.getOwnPropertyDescriptor(globalThis, key)?.value, anotherOwner);
+    assert.ok(markers.some(marker => marker.phase === "native-sink" && marker.edge === "ownership-changed"));
+    assert.equal(process.exitCode, 1);
+  } finally {
+    if (originalDescriptor) Object.defineProperty(globalThis, key, originalDescriptor);
+    else Reflect.deleteProperty(globalThis, key);
+    console.error = previousConsoleError;
+    for (const [name, value] of [["PREPARED_MEASUREMENT_MODE", previousMode], ["GITHUB_EVENT_PATH", previousEvent],
+      ["RUNNER_TEMP", previousTemporary]] as const) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+    process.exitCode = previousExit;
+  }
+});

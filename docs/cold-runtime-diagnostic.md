@@ -37,6 +37,26 @@ without changing the factory result or error. The sink closes over a numeric
 activation ID only and stores no program, input, factory or returned runtime.
 The temporary hook is neither an exported product API nor release source.
 
+Probe `39719731564` at paired logos source
+`331afe787aa826d81931d029251839f849510da1` still failed inside `program_open`
+at the unchanged 4,096-page ceiling, before `base_open` or any query. The next
+temporary diagnostic adds a separate `logos.prepared.native-phase-diagnostic`
+sink. After the trapped call's cleanup, the paired host reports only a scalar
+status and the last guest stage: 0 not entered, 1 entry, 2 wire decode, 3 envelope
+read, 4 program parse, 5 envelope drop, 6 rule copy, 7 compile/index, 8 program
+digest, 9 publication, 10 program reply, 11 reply encoding, or 12 complete.
+Only an `observed` event may carry an integer in that range. `unavailable`,
+`read-failed` and `invalid` carry no stage; none may imply where the guest stopped.
+
+The sink emits one `logos-native-prepared` observation with a fixed stage label.
+It does not emit a start or end event for that stage, measure stage duration,
+or receive an input, exception or runtime graph. Its property has independent
+ownership and exact-descriptor restoration; failures remain observational and
+invalidate telemetry without changing results, errors or cleanup. The original
+factory hook and the product source are unchanged. Both paired source controls
+must run remotely before this observation can be interpreted; no new profile has
+been dispatched by adding the sink.
+
 The explicit remote Nightyard `profile-current` route records checkpoints around
 configuration capture, authenticated source capture, defensive native program
 decoding, `Session.open`, factory creation and asynchronous preparation. It also
