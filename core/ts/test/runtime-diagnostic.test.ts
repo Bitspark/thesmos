@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import {
   Bindings, DatasetSnapshot, Multiplicity, Program,
   type PreparedInputs, type PreparedRuntime, type PreparedViewFactory,
@@ -182,5 +185,68 @@ test("native phase observations validate only scalar stages and preserve errors 
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }
     process.exitCode = previousExit;
+  }
+});
+
+test("native phase sink serializes exact fixed labels in the actual remote diagnostic context", async () => {
+  // This temporary test is required by the paired profile workflow. It does not
+  // invent a runner identity or convert another workflow into a diagnostic run.
+  assert.equal(process.env.GITHUB_ACTIONS, "true");
+  assert.match(process.env.GITHUB_RUN_ID ?? "", /^\d+$/);
+  assert.equal(JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH!, "utf8")).inputs.mode, "profile-current");
+  assert.match(process.env.LOGOS_REVISION ?? "", /^[a-f0-9]{40}$/);
+  assert.match(process.env.THESMOS_REVISION ?? "", /^[a-f0-9]{40}$/);
+  const previousTemporary = process.env.RUNNER_TEMP;
+  assert.ok(previousTemporary);
+  const directory = mkdtempSync(join(previousTemporary, "native-phase-receipt-control-"));
+  const previousMode = process.env.PREPARED_MEASUREMENT_MODE;
+  const previousReceipt = process.env.PREPARED_BUILD_RECEIPT_SHA256;
+  const previousExit = process.exitCode;
+  const previousConsoleLog = console.log;
+  try {
+    mkdirSync(join(directory, "prepared-spaces"));
+    process.env.RUNNER_TEMP = directory;
+    process.env.PREPARED_MEASUREMENT_MODE = "exploratory-current";
+    // Unit records stay in this disposable directory; this marker is not a
+    // candidate build receipt and cannot authorize the later measured process.
+    process.env.PREPARED_BUILD_RECEIPT_SHA256 = createHash("sha256").update("native phase receipt unit control").digest("hex");
+    console.log = () => {};
+    const labels = ["not-entered", "entry", "wire-decode", "envelope-read", "program-parse", "envelope-drop",
+      "rule-copy", "compile-index", "program-digest", "publication", "program-reply", "reply-encode", "complete"];
+    const key = Symbol.for("logos.prepared.native-phase-diagnostic");
+    const input: PreparedInputs = { snapshot: DatasetSnapshot.resolve(Program.empty(), Bindings.empty()), multiplicity: Multiplicity.Set };
+    const runtime: PreparedRuntime = { async request() { throw new Error("No request in this control"); }, close() {} };
+    const factory: PreparedViewFactory = { async prepare() {
+      const sink = Object.getOwnPropertyDescriptor(globalThis, key)?.value as (status: string, phase?: number) => void;
+      for (let code = 0; code < labels.length; code++) sink("observed", code);
+      for (const status of ["unavailable", "read-failed", "invalid"]) sink(status);
+      return runtime;
+    } };
+    assert.equal(await diagnosticFactory(10, factory).prepare(input), runtime);
+    assert.equal(process.exitCode, previousExit);
+    const records = readFileSync(join(directory, "prepared-spaces", "runtime-phases.ndjson"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+    const native = records.filter(record => record.phase === "logos-native-prepared");
+    assert.equal(native.length, 16);
+    for (const [code, label] of labels.entries()) {
+      assert.equal(native[code].edge, "observed");
+      assert.equal(native[code].detail, `phaseCode=${code}; phaseLabel=${label}`);
+    }
+    for (const [offset, status] of ["unavailable", "read-failed", "invalid"].entries()) {
+      assert.equal(native[13 + offset].edge, status);
+      assert.equal(Object.hasOwn(native[13 + offset], "detail"), false);
+    }
+    for (const record of native) {
+      assert.equal(record.run, process.env.GITHUB_RUN_ID);
+      assert.deepEqual(record.source, { logos: process.env.LOGOS_REVISION, thesmos: process.env.THESMOS_REVISION });
+      assert.equal(record.buildReceiptSha256, process.env.PREPARED_BUILD_RECEIPT_SHA256);
+    }
+  } finally {
+    console.log = previousConsoleLog;
+    for (const [name, value] of [["PREPARED_MEASUREMENT_MODE", previousMode], ["RUNNER_TEMP", previousTemporary],
+      ["PREPARED_BUILD_RECEIPT_SHA256", previousReceipt]] as const) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+    process.exitCode = previousExit;
+    rmSync(directory, { recursive: true, force: true });
   }
 });
