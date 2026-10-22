@@ -1,7 +1,8 @@
 # Temporary cold runtime diagnostic
 
-The `runtime-cold-phase-diagnostic` branch is an auxiliary diagnostic, based on
-the reviewed runtime at `4ee59b39a287c4a8b69f4a66756f6332abadb638`. It must not be
+The `runtime-base-phase-diagnostic` branch is an auxiliary diagnostic, based on
+the earlier temporary source `8e67585aa9a4b20ea5461f615eae17654a05e1ab` and the
+reviewed product runtime at `70d778fbd8bb90029761ed79768d1f49be7053c3`. It must not be
 merged or published as a product change. The frozen law and authority adapter
 are unchanged.
 
@@ -45,6 +46,10 @@ sink. After the trapped call's cleanup, the paired host reports only a scalar
 status and the last guest stage: 0 not entered, 1 entry, 2 wire decode, 3 envelope
 read, 4 program parse, 5 envelope drop, 6 rule copy, 7 compile/index, 8 program
 digest, 9 publication, 10 program reply, 11 reply encoding, or 12 complete.
+The current extension appends 13 base payload, 14 base bindings, 15 base options,
+16 base session open, 17 base preparation, 18 base snapshot, 19 base publication
+and 20 base reply. Codes are categorical last-entered labels, not ordered progress:
+the current owned reader drops its wrapper (5) before parsing entries (4).
 Only an `observed` event may carry an integer in that range. `unavailable`,
 `read-failed` and `invalid` carry no stage; none may imply where the guest stopped.
 
@@ -56,6 +61,27 @@ invalidate telemetry without changing results, errors or cleanup. The original
 factory hook and the product source are unchanged. Both paired source controls
 must run remotely before this observation can be interpreted; no new profile has
 been dispatched by adding the sink.
+
+The clean-product current-scale attempt in run `39761837475`, at Logos
+`79bca64e796a96b21d8ab4a7575177b4dd37d2d5` and product Thesmos `70d778f`,
+completed isolated source capture but failed during runtime creation with
+`session_stale`. That receipt contains no native stage or original trap and
+does not establish its cause. Its separately reviewed product cleanup correction
+must precede the next paired diagnostic source; this branch does not supply that
+correction or classify the missing original failure.
+
+Failed synchronous phases, factory preparation and owner preparation now also
+record bounded primitive error fields before cleanup. Data descriptors supply
+name, message, stack, observed classification and stack-exhaustion flag; getters
+are not invoked. String prefixes are capped at 128, 4,096, 16,384 and 1,024 code
+units respectively. At most four object levels are copied; cycles, deeper causes
+and inaccessible objects receive fixed markers. No exception or cause object,
+program, query or context is retained. These records preserve the thrown object's
+identity and do not replace the ordinary exception with a logging error. The
+supervisor checks the exact bounded grammar and keeps the first recorded failure
+separate from the last native observation; neither is an allocation measurement.
+Actual writer controls cover all 21 stage labels and the primitive failure chain,
+including hostile getters, cycles, depth and size bounds, before a probe may run.
 
 The explicit remote Nightyard `profile-current` route records checkpoints around
 configuration capture, authenticated source capture, defensive native program

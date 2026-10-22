@@ -1,4 +1,4 @@
-// Temporary source-bound instrumentation on runtime-cold-phase-diagnostic only.
+// Temporary source-bound instrumentation on runtime-base-phase-diagnostic only.
 // This branch is not a release candidate and this module is not a public API.
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -8,6 +8,52 @@ import type { PreparedViewFactory } from "@bitspark/logos-kernel";
 let sequence = 0;
 let activation = 0;
 type DiagnosticEdge = "start" | "complete" | "failed" | "observed" | "unavailable" | "read-failed" | "invalid";
+type FailureSnapshot = {
+  kind: "object" | "primitive" | "uninspectable" | "cycle" | "depth-limit";
+  name?: string;
+  message?: string;
+  stack?: string;
+  observed?: string;
+  stackExhausted?: boolean;
+  cause?: FailureSnapshot;
+};
+
+// Only bounded primitive fields leave this call. Never retain an Error, context,
+// query, source graph or caller-owned cause, and never invoke a property getter.
+function failureSnapshot(error: unknown, depth = 0, seen = new Set<object>()): FailureSnapshot {
+  if (depth === 4) return { kind: "depth-limit" };
+  if ((typeof error !== "object" || error === null) && typeof error !== "function")
+    return { kind: "primitive", ...(typeof error === "string" ? { message: error.slice(0, 4096) } : {}) };
+  if (seen.has(error)) return { kind: "cycle" };
+  seen.add(error);
+  try {
+    const data = (key: string): unknown => {
+      let current: object | null = error;
+      for (let level = 0; current !== null && level < 6; level++) {
+        const descriptor = Object.getOwnPropertyDescriptor(current, key);
+        if (descriptor) return "value" in descriptor ? descriptor.value : undefined;
+        current = Object.getPrototypeOf(current) as object | null;
+      }
+      return undefined;
+    };
+    const result: FailureSnapshot = { kind: "object" };
+    for (const [key, limit] of [["name", 128], ["message", 4096], ["stack", 16384], ["observed", 1024]] as const) {
+      const value = data(key);
+      if (typeof value === "string") result[key] = value.slice(0, limit);
+    }
+    const stackExhausted = data("stackExhausted");
+    if (typeof stackExhausted === "boolean") result.stackExhausted = stackExhausted;
+    const cause = data("cause");
+    if (cause !== undefined) result.cause = failureSnapshot(cause, depth + 1, seen);
+    return result;
+  } catch { return { kind: "uninspectable" }; }
+}
+
+export function runtimeFailure(id: number, phase: string, error: unknown): void {
+  if (process.env.PREPARED_MEASUREMENT_MODE !== "exploratory-current") return;
+  try { writeCheckpoint(id, phase, "failed", undefined, failureSnapshot(error)); }
+  catch { diagnosticFailure(id, phase, "failed"); }
+}
 
 export function beginRuntimeDiagnostic(operation: "create" | "replace"): number {
   const id = ++activation;
@@ -71,6 +117,8 @@ const nativePhaseLabels = [
   "not-entered", "entry", "wire-decode", "envelope-read", "program-parse",
   "envelope-drop", "rule-copy", "compile-index", "program-digest", "publication",
   "program-reply", "reply-encode", "complete",
+  "base-payload", "base-bindings", "base-options", "base-session-open",
+  "base-prepare", "base-snapshot", "base-publication", "base-reply",
 ] as const;
 
 function installNativeSink(id: number): () => void {
@@ -112,7 +160,7 @@ function installNativeSink(id: number): () => void {
   };
 }
 
-function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail?: string): void {
+function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail?: string, failure?: FailureSnapshot): void {
   if (process.env.GITHUB_ACTIONS !== "true" || !process.env.RUNNER_TEMP ||
       !/^\d+$/.test(process.env.GITHUB_RUN_ID ?? "") || !process.env.GITHUB_EVENT_PATH ||
       JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")).inputs?.mode !== "profile-current" ||
@@ -127,6 +175,7 @@ function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail
     run: process.env.GITHUB_RUN_ID, buildReceiptSha256: process.env.PREPARED_BUILD_RECEIPT_SHA256,
     memory: process.memoryUsage(), resource: process.resourceUsage(), heapLimit: getHeapStatistics().heap_size_limit,
     ...(detail ? { detail } : {}),
+    ...(failure ? { failure } : {}),
   };
   appendFileSync(join(process.env.RUNNER_TEMP, "prepared-spaces", "runtime-phases.ndjson"), JSON.stringify(record) + "\n");
   console.log(JSON.stringify({ runtimePhase: phase, edge, activation: id, heapUsed: record.memory.heapUsed,
@@ -140,7 +189,7 @@ export function runtimePhase<T>(id: number, phase: string, operation: () => T): 
     runtimeCheckpoint(id, phase, "complete");
     return result;
   } catch (error) {
-    runtimeCheckpoint(id, phase, "failed", "The runtime operation threw; its original exception is preserved");
+    runtimeFailure(id, phase, error);
     throw error;
   }
 }
@@ -159,7 +208,7 @@ export function diagnosticFactory(id: number, factory: PreparedViewFactory): Pre
         runtimeCheckpoint(id, "factory-prepare", "complete");
         return runtime;
       } catch (error) {
-        runtimeCheckpoint(id, "factory-prepare", "failed", "Factory preparation threw; its original exception is preserved");
+        runtimeFailure(id, "factory-prepare", error);
         throw error;
       } finally { restoreNativeSink(); restoreSink(); }
     },

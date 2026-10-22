@@ -20,7 +20,7 @@ import {
 } from "./runtime-source.js";
 export { instantiateSpacesObservations } from "./runtime-fragments.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
-import { beginRuntimeDiagnostic, diagnosticFactory, runtimeCheckpoint, runtimePhase } from "./runtime-diagnostic.js";
+import { beginRuntimeDiagnostic, diagnosticFactory, runtimeCheckpoint, runtimeFailure, runtimePhase } from "./runtime-diagnostic.js";
 
 export {
   exportSpacesProof, portableEnvelopeReserve, PreparationRefused, prepareSpacesOverlay, prepareSpacesProgram, SpacesProgram,
@@ -205,7 +205,7 @@ export class SpacesRuntime {
       runtimeCheckpoint(diagnostic, "create", "complete");
       return new SpacesRuntime({ config: captured, owner, factory, profile, base, lease });
     } catch (error) {
-      runtimeCheckpoint(diagnostic, "owner-prepare", "failed", "Preparation threw; its original exception is preserved");
+      runtimeFailure(diagnostic, "owner-prepare", error);
       owner.close(); throw error;
     }
   }
