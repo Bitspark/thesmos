@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
-  Atom, ClauseId, DERIVATION_WIRE_V1_TAG, Derivation, MapProgram, RuleNode, Tuple, clauseFromValue, clauseValue, programBytes, programFromValue,
-  type Clause, type Value,
+  Atom, ClauseId, DERIVATION_WIRE_V1_TAG, Derivation, RuleNode, Tuple, captureProgramEntries, clauseFromValue, programFromValue,
+  type CapturedProgramBytes, type Clause, type MapProgram, type Value,
 } from "@bitspark/logos-contract";
 import { DecodeError, decode, encode, encodeUvarint } from "@bitspark/ontos-codec";
 import { decodeSpaceFacts } from "./bundles.js";
@@ -67,13 +67,11 @@ export class SpacesProgram {
   readonly clauseCount: number;
   readonly payloadBytes: number;
 
-  private constructor(program: MapProgram, sources: Map<string, ClauseSource>, bundles: Source[], bytes: number) {
-    this.#programBytes = programBytes(program);
-    // Keep immutable encoded captures, not another full decoded Term graph beside
-    // the native view that Session must defensively capture at its public boundary.
-    const clauses = new Map<string, Uint8Array>();
-    for (const [id, clause] of program.entries()) clauses.set(id, encode(clauseValue(clause)));
-    this.#clauseBytes = clauses;
+  private constructor(captured: CapturedProgramBytes, sources: Map<string, ClauseSource>, bundles: Source[], bytes: number) {
+    // The contract transfers newly owned bytes. Retain no acquisition AST and
+    // make no second whole-program copy before the public defensive decode.
+    this.#programBytes = captured.programBytes;
+    this.#clauseBytes = captured.clauseBytes;
     this.#sources = sources;
     this.#bundles = bundles;
     this.identity = sha256(this.#programBytes);
@@ -93,33 +91,40 @@ export class SpacesProgram {
       throw new PreparationRefused("invalid-input", "An authenticator and finite acquisition bounds are required");
     }
     if (request.bundles.length > budget.maxBundles) throw new PreparationRefused("budget", "Selected bundle limit exceeded");
-    const program = request.includeLaw ? loadLaw() : new MapProgram();
+    const law = request.includeLaw ? loadLaw() : undefined;
     const sources = new Map<string, ClauseSource>(), unique = new Map<string, Source>();
     let count = 0, bytes = 0;
-    for (const supplied of request.bundles) {
-      bytes += supplied.payload.byteLength;
-      if (!Number.isSafeInteger(bytes) || bytes > budget.maxPayloadBytes) throw new PreparationRefused("budget", "Selected payload limit exceeded");
-      const bundle = copyBundle(supplied);
-      const output = decodeSpaceFacts(bundle.payload);
-      if (request.authenticate({ ...copyBundle(bundle), supplier: decode(encode(output.supplier)) }) !== true) {
-        throw new PreparationRefused("authentication", "Selected space-facts output did not authenticate");
-      }
-      count += output.clauses.length;
-      if (!Number.isSafeInteger(count) || count > budget.maxClauses) throw new PreparationRefused("budget", "Selected clause limit exceeded");
-      // Authentication is part of source identity, even when executable clauses coincide.
-      const sourceBytes = encode(new Tuple([new Atom(bundle.payload), bundle.authentication]));
-      const sourceKey = sha256(sourceBytes);
-      if (unique.has(sourceKey)) continue;
-      const source: Source = { key: sourceKey, bundle, clauses: output.clauses.length,
-        encodedBytes: sourceBytes.byteLength, portable: portableSource(sourceBytes) };
-      unique.set(sourceKey, source);
-      for (const [index, assertion] of output.clauses.entries()) {
-        const id = `supplied/${sourceKey}/${index}`;
-        program.insert(ClauseId.of(id), suppliedClause(assertion, output.supplier, output.space));
-        sources.set(id, { source, index });
+    function* entries(): IterableIterator<readonly [string, Clause]> {
+      if (law) yield* law.entries();
+      for (const supplied of request.bundles) {
+        bytes += supplied.payload.byteLength;
+        if (!Number.isSafeInteger(bytes) || bytes > budget.maxPayloadBytes) throw new PreparationRefused("budget", "Selected payload limit exceeded");
+        const bundle = copyBundle(supplied);
+        const output = decodeSpaceFacts(bundle.payload);
+        if (request.authenticate({ ...copyBundle(bundle), supplier: decode(encode(output.supplier)) }) !== true) {
+          throw new PreparationRefused("authentication", "Selected space-facts output did not authenticate");
+        }
+        count += output.clauses.length;
+        if (!Number.isSafeInteger(count) || count > budget.maxClauses) throw new PreparationRefused("budget", "Selected clause limit exceeded");
+        // Authentication is part of source identity, even when executable clauses coincide.
+        const sourceBytes = encode(new Tuple([new Atom(bundle.payload), bundle.authentication]));
+        const sourceKey = sha256(sourceBytes);
+        if (unique.has(sourceKey)) continue;
+        const source: Source = { key: sourceKey, bundle, clauses: output.clauses.length,
+          encodedBytes: sourceBytes.byteLength, portable: portableSource(sourceBytes) };
+        unique.set(sourceKey, source);
+        for (const [index, assertion] of output.clauses.entries()) {
+          const id = `supplied/${sourceKey}/${index}`;
+          const clause = suppliedClause(assertion, output.supplier, output.space);
+          sources.set(id, { source, index });
+          yield [id, clause];
+        }
       }
     }
-    return new SpacesProgram(program, sources, [...unique.values()], bytes);
+    // The contract exhausts acquisition before surfacing serialization failures,
+    // while capturing each yielded guarded clause without retaining its AST.
+    const captured = captureProgramEntries(entries());
+    return new SpacesProgram(captured, sources, [...unique.values()], bytes);
   }
 
   /** Decode a defensive view: even mutable Term atom bytes cannot alter the capture. */

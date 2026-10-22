@@ -134,9 +134,14 @@ Preparation limits bound acquired bundles, clauses and payload bytes separately 
 portable envelope limits. A source is identified by its exact payload and authentication bytes.
 Two sources containing equal clauses remain separate alternatives with distinct original clause
 IDs. A whole signed output is indivisible at export.
-The source capture retains canonical program bytes and individual encoded clauses,
-so it does not keep a second decoded program graph alongside the runtime's native
-view. `nativeProgram()` and `clause(id)` return defensive decoded values;
+Acquisition passes each guarded clause to the contract's `captureProgramEntries`
+boundary and consumes its owned canonical program and clause bytes. It does not
+accumulate a decoded graph for the whole selected program. Authentication, budget
+charging and assertion syntax checks retain their input order, including duplicate
+sources; acquisition completes before deferred program serialization errors surface.
+The source capture retains those encoded bytes alongside the original whole signed
+sources. `nativeProgram()` and `clause(id)` retain the existing authoritative
+decoders and return defensive values;
 `canonicalProgramBytes()` returns an independently owned byte copy for artifact
 capture. Mutating any outward view cannot alter the source identity or later export.
 This ownership choice preserves the existing canonical encoding and does not by
