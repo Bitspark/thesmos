@@ -65,6 +65,8 @@ export class SpacesProgram {
   readonly #bundles: readonly Source[];
   readonly identity: string;
   readonly clauseCount: number;
+  /** Captured native entries, including the frozen law when selected. Informational only. */
+  readonly programEntryCount: number;
   readonly payloadBytes: number;
 
   private constructor(captured: CapturedProgramBytes, sources: Map<string, ClauseSource>, bundles: Source[], bytes: number) {
@@ -76,6 +78,7 @@ export class SpacesProgram {
     this.#bundles = bundles;
     this.identity = sha256(this.#programBytes);
     this.clauseCount = sources.size;
+    this.programEntryCount = captured.clauseBytes.size;
     this.payloadBytes = bytes;
   }
 

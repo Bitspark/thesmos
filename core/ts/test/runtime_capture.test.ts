@@ -55,6 +55,8 @@ test("incremental acquisition preserves canonical law, guarded clauses and whole
     assert.deepEqual(programBytes(prepared.nativeProgram()), canonical);
     assert.equal(prepared.identity, createHash("sha256").update(canonical).digest("hex"));
     assert.equal(prepared.clauseCount, 3);
+    assert.equal(prepared.programEntryCount, expected.entries().length);
+    assert.equal(prepared.programEntryCount, 3 + (includeLaw ? loadLaw().entries().length : 0));
     assert.equal(prepared.payloadBytes, bundles.reduce((sum, bundle) => sum + bundle.payload.byteLength, 0));
     assert.deepEqual(prepared.selectedBundles(), [first, second]);
     assert.deepEqual(prepared.sourceCosts().map(source => source.clauseId), [

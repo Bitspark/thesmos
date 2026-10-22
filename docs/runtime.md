@@ -144,6 +144,9 @@ sources. `nativeProgram()` and `clause(id)` retain the existing authoritative
 decoders and return defensive values;
 `canonicalProgramBytes()` returns an independently owned byte copy for artifact
 capture. Mutating any outward view cannot alter the source identity or later export.
+`programEntryCount` reports the existing captured-entry count, including the law
+when selected; `clauseCount` counts selected supplied clauses. Both are informational
+metadata. Neither authorizes decoding, inference or a byte-capacity decision.
 This ownership choice preserves the existing canonical encoding and does not by
 itself establish that a particular policy fits the process heap or latency target.
 Preparation records whether each complete source fits the frozen envelope's authentication

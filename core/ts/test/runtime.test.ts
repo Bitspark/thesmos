@@ -84,6 +84,7 @@ test("encoded program and individual clause captures preserve exact bytes under 
     assert.deepEqual(prepared.canonicalProgramBytes(), canonical);
     assert.equal(prepared.clause("not-selected"), undefined);
     const clauses = prepared.nativeProgram().entries();
+    assert.equal(prepared.programEntryCount, clauses.length);
     for (const [id, original] of clauses) {
       const captured = prepared.clause(id)!;
       const capturedBytes = encode(clauseValue(captured));
@@ -101,6 +102,7 @@ test("encoded program and individual clause captures preserve exact bytes under 
       assert.deepEqual(prepared.canonicalProgramBytes(), canonical);
       assert.deepEqual(programBytes(prepared.nativeProgram()), canonical);
       assert.equal(prepared.identity, identity);
+      assert.equal(prepared.programEntryCount, clauses.length);
     }
   }
 });
