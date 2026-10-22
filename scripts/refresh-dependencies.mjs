@@ -133,7 +133,8 @@ async function main() {
     process.exitCode = 1;
   } finally {
     try {
-      // Never leave temporary tarball dependency declarations in the source patch.
+      // Restore package.json even after failure. A partial lock may still hold
+      // installer specs; only a completed reconciliation is an accepted refresh.
       if (intendedBytes) writeFileSync("package.json", intendedBytes);
       const patch = execFileSync("git", ["diff", "--binary", "--", "package.json", "package-lock.json"]);
       writeFileSync(join(output, "dependency.patch"), patch);
