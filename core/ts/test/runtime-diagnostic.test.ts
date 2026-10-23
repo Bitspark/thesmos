@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   Bindings, DatasetSnapshot, Multiplicity, PreparedQuery, PreparedViewLease, Program, Session,
   type PreparedInputs, type PreparedRuntime, type PreparedViewFactory,
 } from "@bitspark/logos-kernel";
-import { diagnosticFactory as factoryCheckpoints, diagnosticPreparedAsync, diagnosticPreparedSync, diagnosticRequest, runtimePhase } from "../src/runtime-diagnostic.js";
+import { diagnosticFactory as factoryCheckpoints, diagnosticPreparedAsync, diagnosticPreparedSync, diagnosticRequest,
+  finalizePreparedResourceRetention, runtimePhase } from "../src/runtime-diagnostic.js";
 import { atom, createSpacesVerifier, path } from "../src/index.js";
 import { createSpacesRuntime, type SpacesRuntimeDecision } from "../src/runtime.js";
 import { copyPreparedResourceRecord, type PreparedResourceRecord } from "../src/runtime-resource-observation.js";
@@ -403,6 +405,7 @@ async function remoteControl(label: string, operation: (control: RemoteControl) 
       failures: () => readLines("runtime-diagnostic-failures.ndjson"), receipt, directory });
   } finally {
     try {
+      finalizePreparedResourceRetention(process.exitCode === undefined ? 0 : Number(process.exitCode));
       for (const [key, descriptor] of descriptors) {
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
         else Reflect.deleteProperty(globalThis, key);
@@ -829,7 +832,7 @@ test("resource scopes preserve absence exact descriptors overlap and thrown iden
     });
     const before = [resourceHook, resourceModeHook].map(key => Object.getOwnPropertyDescriptor(globalThis, key));
     const gate = deferred<void>();
-    const pending = diagnosticPreparedAsync("resource-pending", async () => {
+    const pending = diagnosticPreparedAsync("request", async () => {
       const held = sink(resourceHook);
       assert.equal(Object.getOwnPropertyDescriptor(globalThis, resourceModeHook)?.value, "minimal");
       assert.equal(diagnosticPreparedSync("reentrant-control", () => returned), returned);
@@ -844,7 +847,7 @@ test("resource scopes preserve absence exact descriptors overlap and thrown iden
       assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, key), before[index]);
     assert.equal(getters, 0);
     assert.equal(control.resources().length, 1);
-    assert.equal(control.resources()[0]!.lifecycle, "resource-pending");
+    assert.equal(control.resources()[0]!.lifecycle, "request");
     assert.ok(control.failures().some(record => record.phase === "prepared-scope" && record.edge === "concurrent"));
     const successor = () => {};
     assert.throws(() => diagnosticPreparedSync("changed-resource-owner", () => {
@@ -862,11 +865,12 @@ test("resource forwarding binds actual remote context and refuses malformed or u
   await remoteControl("resource envelope", async control => {
     process.env.PREPARED_RESOURCE_OBSERVER_MODE = "minimal";
     const same = { returned: true };
-    assert.equal(diagnosticPreparedSync("resource-roundtrip", () => {
+    assert.equal(diagnosticPreparedSync("request", () => {
       const observe = sink(resourceHook), record = resourceRecord();
       observe(record); record.exports[0]!.before.words![32] = 0;
       observe({ ...resourceRecord(), mode: "compiled-disabled" });
       observe(resourceRecord(), new Proxy({}, { get() { throw new Error("Extra args must stay unread"); } }));
+      observe(new Proxy({}, { getOwnPropertyDescriptor() { throw new Error("Uninspectable mode must still create a coverage gap"); } }));
       return same;
     }), same);
     const [record] = control.resources();
@@ -881,17 +885,61 @@ test("resource forwarding binds actual remote context and refuses malformed or u
     assert.equal(record.timeOriginMs, performance.timeOrigin);
     assert.deepEqual(record.observation, resourceRecord());
     assert.ok(control.records().some(phase => phase.activation === record.activation && phase.phase === record.lifecycle));
-    assert.equal(control.failures().length, 2);
+    assert.equal(control.failures().length, 3);
+    const coverage = JSON.parse(readFileSync(join(control.directory, "prepared-spaces", "runtime-resources-coverage.json"), "utf8"));
+    assert.equal(coverage.prefix.rows, 1); assert.equal(coverage.observed.invalidRows, 3);
+    assert.equal(coverage.prefix.stop, "invalid-row"); assert.equal(coverage.status, "failed");
+    assert.equal(coverage.observed.lastSequence, record.sequence + 3);
+  });
+  await remoteControl("resource unwritten", async control => {
+    process.env.PREPARED_RESOURCE_OBSERVER_MODE = "minimal";
     const original = new Error("ordinary exception while the collector cannot write");
     const output = join(control.directory, "prepared-spaces", "runtime-resources.ndjson");
-    rmSync(output); mkdirSync(output);
-    assert.throws(() => diagnosticPreparedSync("unwritable-resource", () => {
+    mkdirSync(output);
+    assert.throws(() => diagnosticPreparedSync("request-close", () => {
       try { sink(resourceHook)(resourceRecord()); throw original; }
       finally { sink(operationHook)("close", "complete", "returned"); }
     }), error => error === original);
-    assert.equal(control.failures().length, 3);
+    assert.equal(control.failures().length, 1);
     assert.ok(control.records().some(phase => phase.detail === "operation=close; transportPhase=complete; outcome=returned"));
     assert.equal(process.exitCode, 1);
+    finalizePreparedResourceRetention(1);
+    assert.ok(control.failures().some(value => value.phase === "resource-retention" && value.edge === "finalize-failed"));
+  });
+});
+
+test("selected resource retention finalizes at actual child exit without changing a caught product failure", async () => {
+  await remoteControl("resource real exit", async control => {
+    const environment = { ...process.env, PREPARED_RESOURCE_OBSERVER_MODE: "minimal" };
+    // The real GitHub context is inherited unchanged. Only this owned output
+    // directory and existing fixture identities were selected by remoteControl.
+    const moduleUrl = new URL("../src/runtime-diagnostic.js", import.meta.url).href;
+    const program = `
+      import { readFileSync } from 'node:fs';
+      import { diagnosticPreparedSync } from ${JSON.stringify(moduleUrl)};
+      const record = JSON.parse(readFileSync(0, 'utf8'));
+      const primary = { exact: 'product-failure-control' };
+      let cleaned = false;
+      try {
+        diagnosticPreparedSync('request', () => {
+          const sink = Object.getOwnPropertyDescriptor(globalThis, Symbol.for('logos.prepared.resource-observer')).value;
+          try { sink(record); throw primary; } finally { cleaned = true; }
+        });
+      } catch (error) {
+        if (error !== primary || !cleaned) throw new Error('Product failure/cleanup changed');
+        process.exitCode = 7;
+      }
+    `;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", program], {
+      env: environment, input: JSON.stringify(resourceRecord()), encoding: "utf8", timeout: 10000, maxBuffer: 65536,
+    });
+    assert.equal(child.error, undefined); assert.equal(child.signal, null); assert.equal(child.status, 7);
+    const coverage = JSON.parse(readFileSync(join(control.directory, "prepared-spaces", "runtime-resources-coverage.json"), "utf8"));
+    assert.equal(coverage.prefix.rows, 1); assert.equal(coverage.status, "complete");
+    assert.deepEqual(coverage.finalization, { status: "exit-observed", exitCode: 7 });
+    assert.equal(coverage.authority.productOutcome, "not-assessed");
+    assert.deepEqual(control.failures(), []);
+    assert.ok(control.records().some(record => record.phase === "request" && record.edge === "failed"));
   });
 });
 

@@ -4,11 +4,12 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getHeapStatistics } from "node:v8";
 import type { PreparedViewFactory } from "@bitspark/logos-kernel";
-import { copyPreparedResourceRecord, type PreparedResourceRecord } from "./runtime-resource-observation.js";
+import { createResourceRetention, type ResourceBinding, type SelectedResourceRetention } from "./runtime-resource-retention.js";
 
 let sequence = 0;
 let activation = 0;
 let resourceSequence = 0;
+let resourceRetention: { directory: string; binding: ResourceBinding; sink: SelectedResourceRetention } | undefined;
 let activePreparedScope: number | undefined;
 const noSink = () => {};
 type DiagnosticEdge = "start" | "complete" | "failed" | "observed" | "unavailable" | "read-failed" | "invalid";
@@ -249,10 +250,9 @@ function installResourceSink(id: number, lifecycle: string): () => void {
   }
   const sink = function (record: unknown): void {
     try {
-      if (arguments.length !== 1) throw new TypeError("Expected one fixed resource record");
-      const copied = copyPreparedResourceRecord(record);
-      if (copied.mode !== mode) throw new TypeError("The Searcher mode differs from this observation scope");
-      writeResourceObservation(id, lifecycle, copied);
+      // Every selected callback occupies a sequence, including a rejected one.
+      // Passing the exact count separately avoids reading any unexpected arg.
+      writeResourceObservation(id, lifecycle, record, arguments.length, mode);
     } catch { diagnosticFailure(id, "resource-sink", "invalid-or-unwritten-event"); }
   };
   let previousMode: PropertyDescriptor | undefined, previousSink: PropertyDescriptor | undefined;
@@ -361,7 +361,7 @@ function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail
     rss: record.memory.rss, heapLimit: record.heapLimit }));
 }
 
-function writeResourceObservation(id: number, lifecycle: string, observation: PreparedResourceRecord): void {
+function writeResourceObservation(id: number, lifecycle: string, observation: unknown, argumentCount: number, mode: string): void {
   const env = process.env;
   if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_EVENT_NAME !== "workflow_dispatch" || !env.RUNNER_TEMP ||
       !/^\d+$/.test(env.GITHUB_RUN_ID ?? "") || !env.GITHUB_EVENT_PATH ||
@@ -374,6 +374,26 @@ function writeResourceObservation(id: number, lifecycle: string, observation: Pr
   const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
   if (event.repository?.full_name !== "Bitspark/nightyard" || event.inputs?.mode !== "profile-current")
     throw new Error("Resource observations require the actual profile-current workflow dispatch");
+  const context: ResourceBinding = {
+    source: { logos: env.LOGOS_REVISION!, thesmos: env.THESMOS_REVISION! }, run: env.GITHUB_RUN_ID!,
+    buildReceiptSha256: env.PREPARED_BUILD_RECEIPT_SHA256!, captureId: env.PREPARED_OBSERVATION_CAPTURE_ID!,
+    configurationSha256: env.PREPARED_OBSERVATION_CONFIGURATION_SHA256!,
+    executionClass: env.PREPARED_OBSERVATION_EXECUTION_CLASS as ResourceBinding["executionClass"],
+    pid: process.pid, timeOriginMs: performance.timeOrigin,
+  };
+  const directory = join(env.RUNNER_TEMP, "prepared-spaces");
+  if (resourceRetention === undefined) {
+    resourceRetention = { directory, binding: context, sink: createResourceRetention(directory, context) };
+    process.once("exit", resourceRetentionExit);
+  }
+  if (resourceRetention.directory !== directory || JSON.stringify(resourceRetention.binding) !== JSON.stringify(context))
+    throw new Error("Resource retention context changed within the selected process");
+  let modeMatches = false;
+  try {
+    const descriptor = observation !== null && typeof observation === "object"
+      ? Object.getOwnPropertyDescriptor(observation, "mode") : undefined;
+    modeMatches = descriptor !== undefined && "value" in descriptor && descriptor.value === mode;
+  } catch { /* Uninspectable callbacks still occupy a rejected sequence below. */ }
   const record = {
     format: "thesmos/prepared-resource-observation/1", sequence: ++resourceSequence,
     activation: id, lifecycle, at: new Date().toISOString(), elapsedMs: performance.now(),
@@ -382,9 +402,27 @@ function writeResourceObservation(id: number, lifecycle: string, observation: Pr
     run: env.GITHUB_RUN_ID, buildReceiptSha256: env.PREPARED_BUILD_RECEIPT_SHA256,
     captureId: env.PREPARED_OBSERVATION_CAPTURE_ID,
     configurationSha256: env.PREPARED_OBSERVATION_CONFIGURATION_SHA256,
-    executionClass: env.PREPARED_OBSERVATION_EXECUTION_CLASS, observation,
+    executionClass: env.PREPARED_OBSERVATION_EXECUTION_CLASS,
+    // A bad callback is retained as a coverage gap, never truncated/relabelled.
+    observation: argumentCount === 1 && modeMatches ? observation : null,
   };
-  appendFileSync(join(env.RUNNER_TEMP, "prepared-spaces", "runtime-resources.ndjson"), JSON.stringify(record) + "\n");
+  if (!resourceRetention.sink.accept(record)) throw new Error("Selected resource evidence was refused or could not be retained");
+}
+
+function resourceRetentionExit(code: number): void { finalizePreparedResourceRetention(code); }
+
+// Internal diagnostic finalizer. The actual runtime calls it only from exit;
+// focused controls call the same path before removing their owned directory.
+// No product callback or cleanup is invoked, retried or swallowed by this hook.
+export function finalizePreparedResourceRetention(code: number): void {
+  const current = resourceRetention;
+  resourceRetention = undefined;
+  resourceSequence = 0;
+  process.removeListener("exit", resourceRetentionExit);
+  if (current === undefined) return;
+  try {
+    if (!current.sink.finalize(code)) diagnosticFailure(0, "resource-retention", "finalize-failed");
+  } catch { diagnosticFailure(0, "resource-retention", "finalize-failed"); }
 }
 
 export function runtimePhase<T>(id: number, phase: string, operation: () => T): T {
