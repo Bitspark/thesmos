@@ -181,9 +181,10 @@ function eligible(row: ResourceEnvelope, item: PreparedResourceRecord["exports"]
     ? { latch: false } : { limitation: "invalid-latch", latch: true };
   const anchor = words.slice(4608, 4736), attempt = anchor.slice(24, 72), seq = u64(anchor, 8);
   const ownContext = anchor[20] === 1
-    ? anchor[16]! > 0 && anchor[17]! > 0 && anchor[18]! > 0 &&
+    ? anchor[4] === 1 && anchor[16]! > 0 && anchor[17]! > 0 && anchor[18]! > 0 &&
       anchor[16] === attempt[4] && anchor[17] === attempt[5] && anchor[18] === attempt[6] && anchor[19] === attempt[7]
-    : attempt.slice(4, 8).every(word => word === 0);
+    : anchor[19] === 0 && (anchor[4] !== 0 || anchor.slice(16, 20).every(word => word === 0)) &&
+      attempt.slice(4, 8).every(word => word === 0);
   const ownFailure = anchor[0] === 1 && anchor[3] === 1 && anchor[4]! <= 1 && anchor[7] === 1 &&
     anchor[5] === words[8] && anchor[6]! <= words[9]! && anchor[6] === attempt[16] &&
     u64(anchor, 14) <= u64(words, 18) && !(anchor[2]! & ~127) && anchor[20]! <= 1 && anchor[126] === 0 && anchor[127] === 0 &&

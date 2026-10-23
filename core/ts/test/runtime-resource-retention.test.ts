@@ -221,6 +221,15 @@ test("selected failure eligibility requires own completed latch sequence and act
         words[168 + attemptField!] = value!;
       }
     }),
+    r => { for (const item of r.observation.exports) for (const edge of ["before", "after"] as const) item[edge].words![4612] = 0; },
+    ...["inactive-phase", "preconfiguration-context"].map(kind => (r: ResourceEnvelope) => {
+      for (const item of r.observation.exports) for (const edge of ["before", "after"] as const) {
+        const words = item[edge].words!;
+        words[4628] = 0;
+        for (let i = 0; i < 4; i++) { words[4636 + i] = 0; words[172 + i] = 0; }
+        if (kind === "preconfiguration-context") { words[4612] = 0; words[4627] = 0; }
+      }
+    }),
     r => { for (const item of r.observation.exports) { item.before.words![12]!++; item.after.words![15]!++; } },
     r => { for (const item of r.observation.exports) for (const edge of ["before", "after"] as const) item[edge].words![4608] = 0; },
     r => { for (const item of r.observation.exports) for (const edge of ["before", "after"] as const) item[edge].associationValid = false; },
@@ -232,22 +241,23 @@ test("selected failure eligibility requires own completed latch sequence and act
     assert.equal(sink.snapshot().firstAllocationFailure.earliest.status, "limited");
     assert.ok(storage.prefix.length > 0);
   }
-  for (const active of [false, true]) {
+  for (const ownState of ["preconfiguration", "inactive-after-export", "active-phase-zero"]) {
     const { sink } = fixture(), value = row(1, true);
     for (const item of value.observation.exports) for (const edge of ["before", "after"] as const) {
       const words = item[edge].words!;
-      if (!active) {
-        words[4612] = 0; words[4628] = 0;
+      if (ownState !== "active-phase-zero") {
+        words[4628] = 0; words[4627] = 0;
         for (let i = 0; i < 4; i++) {
-          words[4624 + i] = 0; words[4636 + i] = 0; words[172 + i] = 0;
+          words[4636 + i] = 0; words[172 + i] = 0;
+          if (ownState === "preconfiguration") words[4624 + i] = 0;
         }
+        if (ownState === "preconfiguration") words[4612] = 0;
       } else {
         words[4627] = 0; words[4639] = 0; words[175] = 0;
       }
     }
     assert.equal(sink.accept(value), true);
-    assert.equal(sink.snapshot().firstAllocationFailure.status, "retained",
-      active ? "phase zero remains valid in an active own context" : "preconfiguration inactive zero context remains valid");
+    assert.equal(sink.snapshot().firstAllocationFailure.status, "retained", `legitimate own context remains eligible: ${ownState}`);
   }
 });
 
