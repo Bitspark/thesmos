@@ -245,6 +245,24 @@ test("selected invalid row and sequence gaps never resume a prefix or silently p
   assert.equal(gap.sink.accept(row(4, true)), false);
   assert.equal(gap.sink.snapshot().firstAllocationFailure.selection!.outerSequence, 4);
   assert.equal(gap.sink.snapshot().prefix.stop, "sequence-gap");
+  for (const firstSequence of [2, Number.MAX_SAFE_INTEGER]) {
+    const missingInitial = fixture();
+    assert.equal(missingInitial.sink.accept(row(firstSequence, true)), false);
+    assert.equal(missingInitial.sink.snapshot().prefix.rows, 0);
+    assert.equal(missingInitial.sink.snapshot().prefix.stop, "sequence-gap");
+    assert.equal(missingInitial.sink.snapshot().observed.firstSequence, firstSequence);
+    assert.equal(missingInitial.sink.snapshot().observed.lastSequence, firstSequence);
+    assert.equal(missingInitial.sink.snapshot().firstAllocationFailure.selection, null);
+    assert.equal(missingInitial.sink.snapshot().firstAllocationFailure.earliest.status, "limited");
+    if (firstSequence === 2) {
+      assert.equal(missingInitial.sink.accept(row(3, true)), false);
+      assert.equal(missingInitial.sink.snapshot().firstAllocationFailure.selection!.outerSequence, 3);
+      assert.equal(missingInitial.sink.snapshot().firstAllocationFailure.reference!.member, RESOURCE_MEMBERS.failure);
+      assert.equal(missingInitial.storage.prefix.length, 0);
+    }
+    assert.equal(missingInitial.sink.finalize(0), false);
+    assert.equal(missingInitial.storage.report().status, "failed");
+  }
 });
 
 test("selected partial prefix writes preserve complete bytes and retain failure separately without appending after damage", () => {

@@ -315,7 +315,8 @@ export class SelectedResourceRetention {
       const previous = observed.lastSequence;
       observed.firstSequence ??= envelope.sequence;
       if (previous === null || envelope.sequence > previous) observed.lastSequence = envelope.sequence;
-      if (previous !== null && (previous === Number.MAX_SAFE_INTEGER || envelope.sequence !== previous + 1)) {
+      if (previous === null ? envelope.sequence !== 1
+        : previous === Number.MAX_SAFE_INTEGER || envelope.sequence !== previous + 1) {
         this.#fault("sequence-invalid"); prefix.stop ??= "sequence-gap"; this.#limit("rejected-row"); valid = false;
         // An out-of-order row cannot establish the earliest observed selection.
         throw new TypeError("Noncontiguous selected resource sequence");

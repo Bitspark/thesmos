@@ -38,7 +38,9 @@ changes. The selected sink refuses more than four exports; it never truncates
 them. It validates the ordinary detached record, exact outer fields and scalar
 encodings, then independently checks the complete encoded row bound. The outer
 row remains `thesmos/prepared-resource-observation/1` with the complete 8,960-word
-arrays. Rejected callbacks create an explicit retention gap. A broken prefix is
+arrays. The first callback must have sequence one; a missing initial sequence
+is a gap even when later callbacks are contiguous. Rejected callbacks create
+an explicit retention gap. A broken prefix is
 never resumed; later valid rows may only supply the separately indexed failure.
 
 The coverage format is `thesmos/prepared-resource-retention/1`. Its exact root
