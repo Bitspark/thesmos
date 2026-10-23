@@ -212,6 +212,15 @@ test("selected failure eligibility requires own completed latch sequence and act
     ...[4618, 4630, 4634, 168, 169, 4608, 4612, 4613, 4622, 4734, 0, 325].map(at => (r: ResourceEnvelope) => {
       for (const item of r.observation.exports) for (const edge of ["before", "after"] as const) item[edge].words![at]! += 10;
     }),
+    ...[[16, 4, 0], [17, 5, 0], [18, 6, 0], [16, 4, 8], [17, 5, 8]].map(([anchorField, attemptField, value]) => (r: ResourceEnvelope) => {
+      for (const item of r.observation.exports) for (const edge of ["before", "after"] as const) {
+        const words = item[edge].words!;
+        // Reseal all three copies so only impossible own context discriminates.
+        words[4608 + anchorField!] = value!;
+        words[4608 + 24 + attemptField!] = value!;
+        words[168 + attemptField!] = value!;
+      }
+    }),
     r => { for (const item of r.observation.exports) { item.before.words![12]!++; item.after.words![15]!++; } },
     r => { for (const item of r.observation.exports) for (const edge of ["before", "after"] as const) item[edge].words![4608] = 0; },
     r => { for (const item of r.observation.exports) for (const edge of ["before", "after"] as const) item[edge].associationValid = false; },
@@ -222,6 +231,23 @@ test("selected failure eligibility requires own completed latch sequence and act
     assert.equal(sink.snapshot().firstAllocationFailure.status, "not-observed", "own completed latch sequence is required");
     assert.equal(sink.snapshot().firstAllocationFailure.earliest.status, "limited");
     assert.ok(storage.prefix.length > 0);
+  }
+  for (const active of [false, true]) {
+    const { sink } = fixture(), value = row(1, true);
+    for (const item of value.observation.exports) for (const edge of ["before", "after"] as const) {
+      const words = item[edge].words!;
+      if (!active) {
+        words[4612] = 0; words[4628] = 0;
+        for (let i = 0; i < 4; i++) {
+          words[4624 + i] = 0; words[4636 + i] = 0; words[172 + i] = 0;
+        }
+      } else {
+        words[4627] = 0; words[4639] = 0; words[175] = 0;
+      }
+    }
+    assert.equal(sink.accept(value), true);
+    assert.equal(sink.snapshot().firstAllocationFailure.status, "retained",
+      active ? "phase zero remains valid in an active own context" : "preconfiguration inactive zero context remains valid");
   }
 });
 

@@ -109,6 +109,9 @@ association, raw schema-2 framing, and a published first-lifetime latch whose
 own closed failed alloc/zero/realloc attempt and sequences agree with its
 original first-failure slot. The latch may originate in an earlier export;
 its own context is retained separately from the export that observed it.
+An active own context has positive window, operation and export identifiers;
+its saved window/operation cannot be later than the observing window. Inactive
+preconfiguration zero context and phase zero remain valid possibilities.
 Class-table sums and class/aggregate validity are **not** selection gates:
 invalid class evidence is still retained with its own flags for independent
 analysis. A thrown export without such a latch is not enough. Once selected,

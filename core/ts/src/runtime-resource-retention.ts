@@ -181,7 +181,8 @@ function eligible(row: ResourceEnvelope, item: PreparedResourceRecord["exports"]
     ? { latch: false } : { limitation: "invalid-latch", latch: true };
   const anchor = words.slice(4608, 4736), attempt = anchor.slice(24, 72), seq = u64(anchor, 8);
   const ownContext = anchor[20] === 1
-    ? anchor[16] === attempt[4] && anchor[17] === attempt[5] && anchor[18] === attempt[6] && anchor[19] === attempt[7]
+    ? anchor[16]! > 0 && anchor[17]! > 0 && anchor[18]! > 0 &&
+      anchor[16] === attempt[4] && anchor[17] === attempt[5] && anchor[18] === attempt[6] && anchor[19] === attempt[7]
     : attempt.slice(4, 8).every(word => word === 0);
   const ownFailure = anchor[0] === 1 && anchor[3] === 1 && anchor[4]! <= 1 && anchor[7] === 1 &&
     anchor[5] === words[8] && anchor[6]! <= words[9]! && anchor[6] === attempt[16] &&
@@ -189,7 +190,8 @@ function eligible(row: ResourceEnvelope, item: PreparedResourceRecord["exports"]
     attempt[0] === 3 && attempt[1]! >= 1 && attempt[1]! <= 3 && seq > 0n && seq === u64(anchor, 10) &&
     seq === u64(anchor, 22) && seq === u64(attempt, 2) && seq <= u64(words, 20) && seq <= u64(words, 22) &&
     attempt[14] === 0 && attempt[17]! <= 1 && !(attempt[19]! & ~127) && attempt[36]! <= 3 &&
-    attempt.slice(45).every(word => word === 0) && ownContext && anchor[18]! <= item.ordinal &&
+    attempt.slice(45).every(word => word === 0) && ownContext && anchor[16]! <= record.guestWindow &&
+    anchor[17]! <= record.guestWindow && anchor[18]! <= item.ordinal &&
     attempt.every((word, index) => word === words[168 + index]);
   if (!ownFailure) return { limitation: "invalid-latch", latch: true };
   const ownAnchor = { wordOffset: 4608 as const, wordCount: 128 as const, words: anchor, sha256: wordHash(anchor) };
