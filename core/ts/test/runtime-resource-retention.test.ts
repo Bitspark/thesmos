@@ -111,6 +111,19 @@ test("selected resource metadata enforces closed encoded scalars exact identitie
     assert.throws(() => new SelectedResourceRetention(invalidContext, new MemoryStorage()), TypeError);
     assert.throws(() => copySelectedResourceEnvelope(invalidRow, invalidContext), TypeError);
   }
+  for (const suffix of ["\n", "\r", "\r\n"]) {
+    const mutations: ((binding: ResourceBinding) => void)[] = [
+      b => { b.source.logos = "1".repeat(40 - suffix.length) + suffix; },
+      b => { b.source.thesmos = "2".repeat(40 - suffix.length) + suffix; },
+      b => { b.buildReceiptSha256 = "3".repeat(64 - suffix.length) + suffix; },
+      b => { b.configurationSha256 = "4".repeat(64 - suffix.length) + suffix; },
+    ];
+    for (const mutate of mutations) {
+      const invalidContext = structuredClone(context); mutate(invalidContext);
+      assert.throws(() => new SelectedResourceRetention(invalidContext, new MemoryStorage()), TypeError);
+      assert.throws(() => copySelectedResourceEnvelope({ ...row(), ...invalidContext }, invalidContext), TypeError);
+    }
+  }
   const mutations: ((r: ResourceEnvelope) => void)[] = [
     r => { r.run += "1"; }, r => { r.source.logos += "\n"; }, r => { r.configurationSha256 += "\n"; },
     r => { r.captureId += "\n"; }, r => { r.buildReceiptSha256 = "a".repeat(64); }, r => { r.pid++; },

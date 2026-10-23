@@ -71,7 +71,7 @@ function natural(value: unknown, positive = false): value is number {
 }
 function time(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value) && value >= 0; }
 function hex(value: unknown, length: number): value is string {
-  return typeof value === "string" && value.length === length && /^[a-f0-9]+$/.test(value);
+  return typeof value === "string" && value.length === length && !/[^a-f0-9]/.test(value);
 }
 function binding(value: unknown): ResourceBinding {
   const raw = own(value, ["source", "run", "buildReceiptSha256", "captureId", "configurationSha256", "executionClass", "pid", "timeOriginMs"]);
