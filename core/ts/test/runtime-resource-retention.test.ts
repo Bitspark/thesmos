@@ -112,16 +112,30 @@ test("selected resource metadata enforces closed encoded scalars exact identitie
     assert.throws(() => copySelectedResourceEnvelope(invalidRow, invalidContext), TypeError);
   }
   for (const suffix of ["\n", "\r", "\r\n"]) {
-    const mutations: ((binding: ResourceBinding) => void)[] = [
-      b => { b.source.logos = "1".repeat(40 - suffix.length) + suffix; },
-      b => { b.source.thesmos = "2".repeat(40 - suffix.length) + suffix; },
-      b => { b.buildReceiptSha256 = "3".repeat(64 - suffix.length) + suffix; },
-      b => { b.configurationSha256 = "4".repeat(64 - suffix.length) + suffix; },
-    ];
-    for (const mutate of mutations) {
-      const invalidContext = structuredClone(context); mutate(invalidContext);
-      assert.throws(() => new SelectedResourceRetention(invalidContext, new MemoryStorage()), TypeError);
-      assert.throws(() => copySelectedResourceEnvelope({ ...row(), ...invalidContext }, invalidContext), TypeError);
+    for (const shorten of [false, true]) {
+      const terminated = (value: string) => (shorten ? value.slice(0, -suffix.length) : value) + suffix;
+      const bindingMutations: ((binding: ResourceBinding) => void)[] = [
+        b => { b.source.logos = terminated(b.source.logos); },
+        b => { b.source.thesmos = terminated(b.source.thesmos); },
+        b => { b.buildReceiptSha256 = terminated(b.buildReceiptSha256); },
+        b => { b.configurationSha256 = terminated(b.configurationSha256); },
+        b => { b.captureId = terminated(b.captureId); },
+        b => { b.run = terminated(b.run); },
+      ];
+      for (const mutate of bindingMutations) {
+        const invalidContext = structuredClone(context); mutate(invalidContext);
+        assert.throws(() => new SelectedResourceRetention(invalidContext, new MemoryStorage()), TypeError);
+        assert.throws(() => copySelectedResourceEnvelope({ ...row(), ...invalidContext }, invalidContext), TypeError);
+      }
+      const rowMutations: ((envelope: ResourceEnvelope) => void)[] = [
+        r => { r.at = terminated(r.at); },
+        r => { r.observation.guestIdentity.sha256 = terminated(r.observation.guestIdentity.sha256!); },
+        r => { r.observation.wire.sha256 = terminated(r.observation.wire.sha256!); },
+      ];
+      for (const mutate of rowMutations) {
+        const invalidRow = row(); mutate(invalidRow);
+        assert.throws(() => copySelectedResourceEnvelope(invalidRow, context), TypeError);
+      }
     }
   }
   const mutations: ((r: ResourceEnvelope) => void)[] = [
