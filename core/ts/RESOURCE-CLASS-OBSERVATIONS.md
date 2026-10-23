@@ -128,6 +128,28 @@ checkpoint cannot attest a later failed coverage close or an unwritable update.
 The exit finalizer preserves an already nonzero product exit code while adding
 that independent failure marker; collector failure after an otherwise zero exit
 still makes the process fail. The coverage checkpoint cannot override either.
+After every resource close returns successfully, the sink exposes the exact
+byte length and SHA256 of its last successfully written serialized checkpoint.
+The runtime then appends one positive witness to the existing
+`runtime-phases.ndjson`, with the ordinary `thesmos/cold-runtime-phase/1`
+envelope, the last positive resource activation, phase
+`resource-retention-finalization` and edge `complete`. Its `detail` is the JSON
+encoding of exactly `{format:"thesmos/prepared-resource-finalization/1",
+status:"resource-files-closed",binding,exitCode,coverage}`. Binding is the exact
+`ResourceBinding` above; exitCode is the actual exit-hook argument; coverage is
+exactly `{member:"runtime-resources-coverage.json",bytes,sha256}`. The detail is
+at most 4,096 UTF-8 bytes and the full LF-inclusive phase row at most 8,192.
+It has no console echo, new resource member, or new quota. Its hash is not
+reconstructed from a later mutable snapshot. The existing global phase/output
+limits still apply.
+
+An independent reader needs one matching complete witness to establish this
+finalization. Missing, partial, duplicate or mixed witnesses leave finalization
+unavailable; a verified negative diagnostic makes it failed. This remains true
+when both negative channels fail and an already nonzero product exit survives.
+Clean exits 0, 1 and 7 can all carry a matching positive witness; that witness
+does not turn a failed product into a success. Raw prefix/current/class evidence
+remains independently assessable when finalization is unavailable or failed.
 Outer artifact custody must hash the entire physical prefix file including a
 failed opaque suffix; its whole-file hash is not the complete-prefix hash.
 No temporary files or unbounded failed-write member names are created. Readers

@@ -909,7 +909,9 @@ test("resource forwarding binds actual remote context and refuses malformed or u
 });
 
 test("selected resource retention finalizes at actual child exit without changing a caught product failure", async () => {
-  for (const [productExit, closeFails] of [[7, false], [7, true], [0, true]] as const) await remoteControl(`resource real exit ${productExit} ${closeFails}`, async control => {
+  const cases = [[0, "none"], [1, "none"], [7, "none"], [7, "close"], [0, "close"],
+    [7, "close-no-negative"], [7, "witness-before"], [7, "witness-partial"]] as const;
+  for (const [productExit, fault] of cases) await remoteControl(`resource real exit ${productExit} ${fault}`, async control => {
     const environment = { ...process.env, PREPARED_RESOURCE_OBSERVER_MODE: "minimal" };
     // The real GitHub context is inherited unchanged. Only this owned output
     // directory and existing fixture identities were selected by remoteControl.
@@ -920,9 +922,12 @@ test("selected resource retention finalizes at actual child exit without changin
       import { syncBuiltinESMExports } from 'node:module';
       import { diagnosticPreparedSync } from ${JSON.stringify(moduleUrl)};
       const record = JSON.parse(fs.readFileSync(0, 'utf8'));
-      const productExit = ${productExit}, closeFails = ${closeFails};
+      const productExit = ${productExit}, fault = ${JSON.stringify(fault)}, closeFails = fault.startsWith('close');
       const target = join(process.env.RUNNER_TEMP, 'prepared-spaces', 'runtime-resources-coverage.json');
-      const originalOpen = fs.openSync, originalClose = fs.closeSync;
+      const phaseTarget = join(process.env.RUNNER_TEMP, 'prepared-spaces', 'runtime-phases.ndjson');
+      const failureTarget = join(process.env.RUNNER_TEMP, 'prepared-spaces', 'runtime-diagnostic-failures.ndjson');
+      const originalOpen = fs.openSync, originalClose = fs.closeSync, originalAppend = fs.appendFileSync;
+      const originalError = console.error;
       let coverageFd;
       if (closeFails) {
         fs.openSync = function (...args) {
@@ -934,11 +939,30 @@ test("selected resource retention finalizes at actual child exit without changin
           if (fd !== coverageFd) return originalClose(fd);
           try { originalClose(fd); }
           finally { fs.openSync = originalOpen; fs.closeSync = originalClose; syncBuiltinESMExports(); }
-          process.stderr.write('CONTROL_RESOURCE_CLOSE_AFTER_REAL_CLOSE\\n');
+          fs.writeSync(2, 'CONTROL_RESOURCE_CLOSE_AFTER_REAL_CLOSE\\n');
           throw new Error('Controlled late coverage close failure');
         };
         syncBuiltinESMExports();
       }
+      if (fault === 'close-no-negative' || fault.startsWith('witness-')) {
+        fs.appendFileSync = function (file, data, ...rest) {
+          if (fault === 'close-no-negative' && file === failureTarget) throw new Error('Controlled unavailable failure sidecar');
+          if (fault.startsWith('witness-') && file === phaseTarget && typeof data === 'string' &&
+              data.includes('"phase":"resource-retention-finalization"')) {
+            fs.appendFileSync = originalAppend; syncBuiltinESMExports();
+            if (fault === 'witness-partial') Reflect.apply(originalAppend, this, [file, data.slice(0, 37), ...rest]);
+            fs.writeSync(2, 'CONTROL_RESOURCE_WITNESS_WRITE_' + fault + '\\n');
+            throw new Error('Controlled unavailable finalization witness');
+          }
+          return Reflect.apply(originalAppend, this, [file, data, ...rest]);
+        };
+        syncBuiltinESMExports();
+      }
+      if (fault === 'close-no-negative') console.error = function () {
+        fs.writeSync(2, 'CONTROL_RESOURCE_NEGATIVE_CHANNELS_UNAVAILABLE\\n');
+        fs.appendFileSync = originalAppend; console.error = originalError; syncBuiltinESMExports();
+        throw new Error('Controlled unavailable stderr failure marker');
+      };
       const primary = { exact: 'product-failure-control' };
       let cleaned = false;
       try {
@@ -956,21 +980,46 @@ test("selected resource retention finalizes at actual child exit without changin
       env: environment, input: JSON.stringify(resourceRecord()), encoding: "utf8", timeout: 10000, maxBuffer: 65536,
     });
     assert.equal(child.error, undefined); assert.equal(child.signal, null);
-    assert.equal(child.status, productExit || 1, "late collector failure preserves an already nonzero product exit");
-    const coverage = JSON.parse(readFileSync(join(control.directory, "prepared-spaces", "runtime-resources-coverage.json"), "utf8"));
+    assert.equal(child.status, fault === "none" ? productExit : productExit || 1,
+      "late collector failure preserves an already nonzero product exit");
+    const coverageBytes = readFileSync(join(control.directory, "prepared-spaces", "runtime-resources-coverage.json"));
+    const coverage = JSON.parse(coverageBytes.toString());
     assert.equal(coverage.prefix.rows, 1); assert.equal(coverage.status, "complete");
     assert.deepEqual(coverage.finalization, { status: "exit-observed", exitCode: productExit });
     assert.equal(coverage.authority.productOutcome, "not-assessed");
-    if (closeFails) {
-      assert.match(child.stderr, /CONTROL_RESOURCE_CLOSE_AFTER_REAL_CLOSE/);
-      assert.deepEqual(control.failures(), [{ format: "thesmos/cold-runtime-diagnostic-failure/1", activation: 0,
-        phase: "resource-retention", edge: "finalize-failed" }],
-      "the independent failure channel must reject a checkpoint written before the failed close");
-    } else {
-      assert.doesNotMatch(child.stderr, /CONTROL_RESOURCE_CLOSE_AFTER_REAL_CLOSE/);
+    const phasesBytes = readFileSync(join(control.directory, "prepared-spaces", "runtime-phases.ndjson"));
+    const completeBytes = phasesBytes.lastIndexOf(10) + 1;
+    const phases = phasesBytes.subarray(0, completeBytes).toString().trim().split("\n").map(line => JSON.parse(line));
+    const witnesses = phases.filter(record => record.phase === "resource-retention-finalization");
+    assert.equal(phasesBytes.length - completeBytes, fault === "witness-partial" ? 37 : 0,
+      "a partial witness remains an opaque tail, never a complete positive row");
+    if (fault === "none") {
+      assert.equal(witnesses.length, 1);
+      const witness = witnesses[0]!;
+      assert.equal(witness.format, "thesmos/cold-runtime-phase/1"); assert.equal(witness.edge, "complete");
+      assert.equal(witness.activation, control.resources()[0]!.activation);
+      assert.equal(witness.pid, coverage.binding.pid); assert.deepEqual(witness.source, coverage.binding.source);
+      assert.equal(witness.run, coverage.binding.run); assert.equal(witness.buildReceiptSha256, coverage.binding.buildReceiptSha256);
+      assert.ok(Buffer.byteLength(witness.detail, "utf8") <= 4096);
+      assert.ok(Buffer.byteLength(JSON.stringify(witness) + "\n", "utf8") <= 8192);
+      assert.deepEqual(JSON.parse(witness.detail), { format: "thesmos/prepared-resource-finalization/1", status: "resource-files-closed",
+        binding: coverage.binding, exitCode: productExit, coverage: { member: "runtime-resources-coverage.json",
+          bytes: coverageBytes.length, sha256: createHash("sha256").update(coverageBytes).digest("hex") } });
       assert.deepEqual(control.failures(), []);
+    } else {
+      assert.deepEqual(witnesses, [], "stale complete coverage and a product failure exit cannot substitute for the post-close witness");
+      if (fault === "close-no-negative") {
+        assert.deepEqual(control.failures(), []);
+        assert.match(child.stderr, /CONTROL_RESOURCE_NEGATIVE_CHANNELS_UNAVAILABLE/);
+        assert.doesNotMatch(child.stderr, /thesmos\/cold-runtime-diagnostic-failure/);
+      } else assert.deepEqual(control.failures(), [{ format: "thesmos/cold-runtime-diagnostic-failure/1", activation: 0,
+        phase: "resource-retention", edge: "finalize-failed" }]);
     }
-    assert.ok(control.records().some(record => record.phase === "request" && record.edge === (productExit ? "failed" : "complete")));
+    if (fault.startsWith("close")) {
+      assert.match(child.stderr, /CONTROL_RESOURCE_CLOSE_AFTER_REAL_CLOSE/);
+    }
+    if (fault.startsWith("witness-")) assert.match(child.stderr, /CONTROL_RESOURCE_WITNESS_WRITE_witness-/);
+    assert.ok(phases.some(record => record.phase === "request" && record.edge === (productExit ? "failed" : "complete")));
   });
 });
 

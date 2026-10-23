@@ -9,7 +9,7 @@ import { createResourceRetention, type ResourceBinding, type SelectedResourceRet
 let sequence = 0;
 let activation = 0;
 let resourceSequence = 0;
-let resourceRetention: { directory: string; binding: ResourceBinding; sink: SelectedResourceRetention } | undefined;
+let resourceRetention: { directory: string; binding: ResourceBinding; sink: SelectedResourceRetention; lastActivation: number } | undefined;
 let activePreparedScope: number | undefined;
 const noSink = () => {};
 type DiagnosticEdge = "start" | "complete" | "failed" | "observed" | "unavailable" | "read-failed" | "invalid";
@@ -339,7 +339,7 @@ export function diagnosticRequest<T>(operation: () => Promise<T>): Promise<T> {
   return diagnosticPreparedAsync("request", operation);
 }
 
-function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail?: string, failure?: FailureSnapshot): void {
+function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail?: string, failure?: FailureSnapshot, resourceCompletion = false): void {
   if (process.env.GITHUB_ACTIONS !== "true" || !process.env.RUNNER_TEMP ||
       !/^\d+$/.test(process.env.GITHUB_RUN_ID ?? "") || !process.env.GITHUB_EVENT_PATH ||
       JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")).inputs?.mode !== "profile-current" ||
@@ -356,8 +356,12 @@ function writeCheckpoint(id: number, phase: string, edge: DiagnosticEdge, detail
     ...(detail ? { detail } : {}),
     ...(failure ? { failure } : {}),
   };
-  appendFileSync(join(process.env.RUNNER_TEMP, "prepared-spaces", "runtime-phases.ndjson"), JSON.stringify(record) + "\n");
-  console.log(JSON.stringify({ runtimePhase: phase, edge, activation: id, heapUsed: record.memory.heapUsed,
+  const encoded = JSON.stringify(record) + "\n";
+  if (resourceCompletion && (phase !== "resource-retention-finalization" || edge !== "complete" || failure !== undefined ||
+      !Number.isSafeInteger(id) || id <= 0 || typeof detail !== "string" || Buffer.byteLength(detail, "utf8") > 4096 ||
+      Buffer.byteLength(encoded, "utf8") > 8192)) throw new Error("Invalid resource finalization witness");
+  appendFileSync(join(process.env.RUNNER_TEMP, "prepared-spaces", "runtime-phases.ndjson"), encoded);
+  if (!resourceCompletion) console.log(JSON.stringify({ runtimePhase: phase, edge, activation: id, heapUsed: record.memory.heapUsed,
     rss: record.memory.rss, heapLimit: record.heapLimit }));
 }
 
@@ -383,11 +387,12 @@ function writeResourceObservation(id: number, lifecycle: string, observation: un
   };
   const directory = join(env.RUNNER_TEMP, "prepared-spaces");
   if (resourceRetention === undefined) {
-    resourceRetention = { directory, binding: context, sink: createResourceRetention(directory, context) };
+    resourceRetention = { directory, binding: context, sink: createResourceRetention(directory, context), lastActivation: id };
     process.once("exit", resourceRetentionExit);
   }
   if (resourceRetention.directory !== directory || JSON.stringify(resourceRetention.binding) !== JSON.stringify(context))
     throw new Error("Resource retention context changed within the selected process");
+  resourceRetention.lastActivation = id;
   let modeMatches = false;
   try {
     const descriptor = observation !== null && typeof observation === "object"
@@ -428,7 +433,10 @@ export function finalizePreparedResourceRetention(code: number): void {
     if (Number.isSafeInteger(code) && code !== 0) process.exitCode = code;
   };
   try {
-    if (!current.sink.finalize(code)) retentionFailure();
+    if (!current.sink.finalize(code)) { retentionFailure(); return; }
+    const completion = current.sink.completion();
+    if (completion === null) throw new Error("Resource finalization has no closed checkpoint identity");
+    writeCheckpoint(current.lastActivation, "resource-retention-finalization", "complete", JSON.stringify(completion), undefined, true);
   } catch { retentionFailure(); }
 }
 

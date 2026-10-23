@@ -31,6 +31,11 @@ export type ResourceEnvelope = ResourceBinding & {
   format: "thesmos/prepared-resource-observation/1"; sequence: number; activation: number;
   lifecycle: string; at: string; elapsedMs: number; observation: PreparedResourceRecord;
 };
+export type ResourceFinalization = {
+  format: "thesmos/prepared-resource-finalization/1"; status: "resource-files-closed";
+  binding: ResourceBinding; exitCode: number;
+  coverage: { member: "runtime-resources-coverage.json"; bytes: number; sha256: string };
+};
 type Snapshot = PreparedResourceRecord["exports"][number]["before"];
 type Selection = {
   outerSequence: number; activation: number; lifecycle: string; searcher: number; generation: number; hostCall: number;
@@ -260,6 +265,8 @@ export class SelectedResourceRetention {
   #ended = false;
   #coverageFailed = false;
   #reserveAttemptBytes = 0;
+  #writtenCoverage: { bytes: number; sha256: string } | null = null;
+  #completion: ResourceFinalization | null = null;
   constructor(context: ResourceBinding, storage: ResourceStorage) {
     this.#storage = storage;
     this.#coverage = {
@@ -278,6 +285,7 @@ export class SelectedResourceRetention {
     this.#checkpoint();
   }
   snapshot(): ResourceCoverage { return structuredClone(this.#coverage); }
+  completion(): ResourceFinalization | null { return structuredClone(this.#completion); }
   #fault(code: Fault): void { if (!this.#coverage.faults.includes(code)) this.#coverage.faults.push(code); }
   #increment(object: Record<string, number>, key: string): void {
     const current = object[key]!;
@@ -302,7 +310,9 @@ export class SelectedResourceRetention {
     try {
       need(encoded.length <= RESOURCE_LIMITS.coverageBytes);
       need(value.prefix.bytes + (value.prefix.partialTailBytes ?? RESOURCE_LIMITS.rowBytes) + this.#reserveAttemptBytes + encoded.length <= RESOURCE_LIMITS.combinedBytes);
-      this.#storage.writeCoverage(encoded); return true;
+      this.#storage.writeCoverage(encoded);
+      this.#writtenCoverage = { bytes: encoded.length, sha256: sha(encoded) };
+      return true;
     } catch { this.#coverageFailed = true; this.#fault("coverage-write-failed"); value.status = "failed"; return false; }
   }
   accept(value: unknown): boolean {
@@ -382,6 +392,13 @@ export class SelectedResourceRetention {
       // channel/exit status; a reader must not trust this file alone.
       this.#fault("finalize-failed"); this.#coverage.status = "failed"; return false;
     }
-    return written && !this.#coverageFailed && this.#coverage.faults.length === 0;
+    if (!written || this.#coverageFailed || this.#coverage.faults.length > 0 || this.#writtenCoverage === null) return false;
+    // This exact serialized checkpoint was successfully written before close.
+    // Expose its identity only after every resource close has returned; callers
+    // must not reconstruct a completion witness from a mutable snapshot.
+    this.#completion = { format: "thesmos/prepared-resource-finalization/1", status: "resource-files-closed",
+      binding: structuredClone(this.#coverage.binding), exitCode,
+      coverage: { member: "runtime-resources-coverage.json", ...this.#writtenCoverage } };
+    return true;
   }
 }

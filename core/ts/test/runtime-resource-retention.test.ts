@@ -175,10 +175,16 @@ test("selected first allocation latch references exact prefix bytes and its own 
   assert.ok(Buffer.byteLength(JSON.stringify(selection.anchor)) <= 2048);
   value.observation.exports[0]!.before.words![4608] = 0;
   assert.equal(sink.snapshot().firstAllocationFailure.selection!.anchor.words[0], 1);
+  assert.equal(sink.completion(), null);
   assert.equal(sink.finalize(1), true);
   assert.equal(storage.report().status, "complete");
   assert.deepEqual(storage.report().finalization, { status: "exit-observed", exitCode: 1 });
   assert.equal(storage.report().authority.productOutcome, "not-assessed");
+  assert.deepEqual(sink.completion(), { format: "thesmos/prepared-resource-finalization/1", status: "resource-files-closed",
+    binding: context, exitCode: 1,
+    coverage: { member: RESOURCE_MEMBERS.coverage, bytes: storage.coverage.length, sha256: sha(storage.coverage) } });
+  const detached = sink.completion()!; detached.coverage.sha256 = "0".repeat(64);
+  assert.equal(sink.completion()!.coverage.sha256, sha(storage.coverage));
 });
 
 test("selected failure ordering uses export ordinal then before after without reordering retained raw rows", () => {
@@ -366,6 +372,7 @@ test("selected coverage and finalization failures stay explicit without losing t
     const { sink, storage } = fixture(); sink.accept(row(1)); const digest = sha(storage.prefix);
     storage[failure] = true;
     assert.equal(sink.finalize(1), false); assert.equal(sink.snapshot().status, "failed");
+    assert.equal(sink.completion(), null, "failed close/finalization exposes no positive completion identity");
     assert.equal(sha(storage.prefix), digest); assert.equal(storage.settled, true); assert.equal(storage.closed, true);
     if (failure === "closeFault") assert.equal(storage.report().status, "complete",
       "the earlier persisted checkpoint cannot attest a later close: the runtime's independent failure channel must be joined");
