@@ -101,6 +101,16 @@ test("selected resource retention keeps the ordinary sixteen export protocol but
 });
 
 test("selected resource metadata enforces closed encoded scalars exact identities safe counters and literal lifecycles", () => {
+  const shortContext = { ...structuredClone(context), run: "1" }, shortRow = { ...row(), run: "1" };
+  const shortSink = new SelectedResourceRetention(shortContext, new MemoryStorage());
+  assert.equal(shortSink.accept(shortRow), true);
+  assert.equal(copySelectedResourceEnvelope(shortRow, shortContext).run, "1");
+  assert.equal(shortSink.finalize(0), true);
+  for (const run of ["1\n", "1\r", "1\r\n"]) {
+    const invalidContext = { ...shortContext, run }, invalidRow = { ...shortRow, run };
+    assert.throws(() => new SelectedResourceRetention(invalidContext, new MemoryStorage()), TypeError);
+    assert.throws(() => copySelectedResourceEnvelope(invalidRow, invalidContext), TypeError);
+  }
   const mutations: ((r: ResourceEnvelope) => void)[] = [
     r => { r.run += "1"; }, r => { r.source.logos += "\n"; }, r => { r.configurationSha256 += "\n"; },
     r => { r.captureId += "\n"; }, r => { r.buildReceiptSha256 = "a".repeat(64); }, r => { r.pid++; },

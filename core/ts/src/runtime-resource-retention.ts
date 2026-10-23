@@ -77,7 +77,7 @@ function binding(value: unknown): ResourceBinding {
   const raw = own(value, ["source", "run", "buildReceiptSha256", "captureId", "configurationSha256", "executionClass", "pid", "timeOriginMs"]);
   const source = own(raw.source, ["logos", "thesmos"]);
   need(hex(source.logos, 40) && hex(source.thesmos, 40) && hex(raw.buildReceiptSha256, 64) && hex(raw.configurationSha256, 64));
-  need(typeof raw.run === "string" && raw.run.length >= 1 && raw.run.length <= 20 && /^[1-9][0-9]*$/.test(raw.run));
+  need(typeof raw.run === "string" && raw.run.length >= 1 && raw.run.length <= 20 && /^[1-9][0-9]*$/.exec(raw.run)?.[0] === raw.run);
   need(typeof raw.captureId === "string" && raw.captureId.length === 36 &&
     /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(raw.captureId));
   need(raw.executionClass === "minimal-diagnostic" || raw.executionClass === "focused-diagnostic");
