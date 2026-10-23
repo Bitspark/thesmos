@@ -98,7 +98,10 @@ function wireIdentity(value: unknown) {
 
 function hostMemory(value: unknown) {
   const source = object(value, ["limitPages", "pageBytes", "limitBytes"]);
-  const limitPages = positive(data(source, "limitPages"), 65536);
+  // This paired private /2 domain mirrors Logos host_abi.ts MAX_MEMORY_PAGES,
+  // enforced by Searcher before installing its memory_limit_pages import. It is
+  // not wasm32's theoretical address-space bound or a new public SPI option.
+  const limitPages = positive(data(source, "limitPages"), 16384);
   const pageBytes = integer(data(source, "pageBytes"));
   const limitBytes = positive(data(source, "limitBytes"));
   if (pageBytes !== 65536 || limitBytes !== limitPages * pageBytes) return invalid();

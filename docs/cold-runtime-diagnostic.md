@@ -231,7 +231,8 @@ host reader; its `status`, `reason`, `association`, `aggregateValid` and
 and the ordinary transport outcome. Invalid/unavailable observations remain
 available to the supervisor rather than being relabelled successful samples.
 
-The closed `hostMemory` object carries positive integer `limitPages`, wasm32
+The closed `hostMemory` object carries integer `limitPages` in the paired host's
+`1..16384` domain (Logos `host_abi.ts` `MAX_MEMORY_PAGES`), wasm32
 `pageBytes=65536` and their exact product `limitBytes`. The host binds this actual
 effective import/getter selection to its Searcher/generation, including instances
 replaced after traps. It is available without growth and with counters disabled;

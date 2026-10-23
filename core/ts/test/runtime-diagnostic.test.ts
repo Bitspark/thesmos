@@ -718,6 +718,7 @@ test("resource record grammar rejects getters holes extra graphs and out-of-doma
     value => ({ ...value, hostMemory: { ...value.hostMemory, limitPages: 0 } }),
     value => ({ ...value, hostMemory: { ...value.hostMemory, limitPages: 1.5 } }),
     value => ({ ...value, hostMemory: { ...value.hostMemory, limitPages: 65537 } }),
+    value => ({ ...value, hostMemory: { limitPages: 16385, pageBytes: 65536, limitBytes: 16385 * 65536 } }),
     value => ({ ...value, hostMemory: { ...value.hostMemory, pageBytes: 4096 } }),
     value => ({ ...value, hostMemory: { ...value.hostMemory, limitBytes: value.hostMemory.limitBytes + 1 } }),
     value => ({ ...value, hostMemory: { ...value.hostMemory, limitBytes: Number.MAX_SAFE_INTEGER + 1 } }),
@@ -776,6 +777,12 @@ test("resource cap and input-guard provenance remain separate from counters and 
     // fixed raw growth fields (all zero in this shape control) observed it.
     replacement.exports[0]!.after.memoryPages = 33;
     assert.equal(copyPreparedResourceRecord(replacement).exports[0]!.after.memoryPages, 33);
+    const ceiling = resourceRecord(mode);
+    ceiling.hostMemory = { limitPages: 16384, pageBytes: 65536, limitBytes: 16384 * 65536 };
+    ceiling.exports[0]!.after.memoryPages = 16385;
+    const observed = copyPreparedResourceRecord(ceiling);
+    assert.equal(observed.hostMemory.limitPages, 16384, "the exact paired host ceiling remains admissible");
+    assert.equal(observed.exports[0]!.after.memoryPages, 16385, "extent remains independent of the cooperative host cap domain");
   }
 });
 
