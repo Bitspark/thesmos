@@ -71,8 +71,8 @@ function snapshot(value: unknown) {
   const memoryPages = pagesValue === null ? null : integer(pagesValue, 65536);
   const raw = data(source, "words");
   const carriesWords = status === "observed" || status === "disabled";
-  const words = raw === null ? null : array(raw, 320, word => integer(word, 0xffff_ffff));
-  if (carriesWords !== (words !== null) || (words !== null && words.length !== 320)) return invalid();
+  const words = raw === null ? null : array(raw, 8960, word => integer(word, 0xffff_ffff));
+  if (carriesWords !== (words !== null) || (words !== null && words.length !== 8960)) return invalid();
   const aggregateValid = boolean(data(source, "aggregateValid"));
   const associationValid = boolean(data(source, "associationValid"));
   if (status !== "observed" && (aggregateValid || associationValid)) return invalid();
@@ -98,7 +98,7 @@ function wireIdentity(value: unknown) {
 
 function hostMemory(value: unknown) {
   const source = object(value, ["limitPages", "pageBytes", "limitBytes"]);
-  // This paired private /2 domain mirrors Logos host_abi.ts MAX_MEMORY_PAGES,
+  // This paired private /3 domain mirrors Logos host_abi.ts MAX_MEMORY_PAGES,
   // enforced by Searcher before installing its memory_limit_pages import. It is
   // not wasm32's theoretical address-space bound or a new public SPI option.
   const limitPages = positive(data(source, "limitPages"), 16384);
@@ -155,7 +155,7 @@ export function copyPreparedResourceRecord(value: unknown) {
   const phase = oneOf(data(source, "phase"), phases), outcome = oneOf(data(source, "outcome"), ["returned", "threw"] as const);
   if ((phase === "complete") !== (outcome === "returned")) return invalid();
   return {
-    schema: oneOf(data(source, "schema"), ["logos/prepared-resource-observation/2"] as const),
+    schema: oneOf(data(source, "schema"), ["logos/prepared-resource-observation/3"] as const),
     mode: oneOf(data(source, "mode"), ["minimal", "compiled-disabled"] as const),
     searcher: positive(data(source, "searcher")), hostCall: positive(data(source, "hostCall")),
     operation: oneOf(data(source, "operation"), operations),

@@ -653,9 +653,10 @@ test("actual SpacesRuntime request keeps observations active through lease await
 
 // This is a shape-only unit fixture, never a measured guest or candidate receipt.
 function resourceRecord(mode: "minimal" | "compiled-disabled" = "minimal"): PreparedResourceRecord {
-  const words = Array<number>(320).fill(0);
-  words[0] = 0x4c4d4f31; words[1] = 1; words[2] = 1280; words[4] = mode === "minimal" ? 1 : 0;
-  words[5] = 1; words[7] = 1280; words[26] = 15;
+  const words = Array<number>(8960).fill(0);
+  words[0] = 0x4c4d4f32; words[1] = 2; words[2] = 35840; words[4] = mode === "minimal" ? 1 : 0;
+  words[5] = 1; words[7] = 35840; words[26] = 31;
+  words.splice(321, 7, 1056, 33, 32, 384, 4608, 4736, 4);
   // Preserve the exact two words; the forwarding boundary never turns this u64
   // into an imprecise Number or asserts that the unit fixture was observed.
   words[32] = 0xffff_ffff; words[33] = 0xffff_ffff;
@@ -663,7 +664,7 @@ function resourceRecord(mode: "minimal" | "compiled-disabled" = "minimal"): Prep
     reason: null, association: mode === "minimal" ? "accepted" as const : "disabled" as const,
     memoryPages: 16, words: [...words], aggregateValid: mode === "minimal", associationValid: mode === "minimal" });
   return {
-    schema: "logos/prepared-resource-observation/2", mode, searcher: 7, hostCall: 9, operation: "admit",
+    schema: "logos/prepared-resource-observation/3", mode, searcher: 7, hostCall: 9, operation: "admit",
     startedGeneration: 1, generation: 1, guestWindow: 3, clock: "performance.now", timeOriginMs: 1000,
     hostMemory: { limitPages: 32, pageBytes: 65536, limitBytes: 32 * 65536 },
     preparedInput: { status: "observed", limitBytes: 123456, reason: null },
@@ -709,7 +710,7 @@ test("resource records copy exact fixed words and detached containers without co
 test("resource record grammar rejects getters holes extra graphs and out-of-domain fields", () => {
   const mutations: ((record: PreparedResourceRecord) => unknown)[] = [
     value => ({ ...value, schema: "other" }), value => ({ ...value, operation: "source-capture" }),
-    value => ({ ...value, schema: "logos/prepared-resource-observation/1" }),
+    value => ({ ...value, schema: "logos/prepared-resource-observation/2" }),
     value => { Reflect.deleteProperty(value, "hostMemory"); return value; },
     value => { Reflect.deleteProperty(value, "preparedInput"); return value; },
     ...["limitPages", "pageBytes", "limitBytes"].map(field => (value: PreparedResourceRecord) => {
@@ -784,6 +785,23 @@ test("resource cap and input-guard provenance remain separate from counters and 
     assert.equal(observed.hostMemory.limitPages, 16384, "the exact paired host ceiling remains admissible");
     assert.equal(observed.exports[0]!.after.memoryPages, 16385, "extent remains independent of the cooperative host cap domain");
   }
+});
+
+test("resource class matrices retain independent faults and exact detached tail words", () => {
+  const value = resourceRecord();
+  const words = value.exports[0]!.after.words!;
+  words[320] = 4; words[4608] = 1; words[4609] = 2;
+  words[8958] = 0xffff_ffff; words[8959] = 0x1234_5678;
+  const copy = copyPreparedResourceRecord(value);
+  assert.equal(copy.exports[0]!.after.aggregateValid, true, "copier does not erase aggregate validity for a class fault");
+  assert.deepEqual(copy.exports[0]!.after.words!.slice(-2), [0xffff_ffff, 0x1234_5678]);
+  words[4609] = 0; words[8959] = 0;
+  assert.equal(copy.exports[0]!.after.words![4609], 2);
+  assert.equal(copy.exports[0]!.after.words![8959], 0x1234_5678);
+  const oldLength = resourceRecord(); oldLength.exports[0]!.after.words!.length = 320;
+  assert.throws(() => copyPreparedResourceRecord(oldLength), TypeError);
+  const hole = resourceRecord(); Reflect.deleteProperty(hole.exports[0]!.after.words!, "8959");
+  assert.throws(() => copyPreparedResourceRecord(hole), TypeError);
 });
 
 test("resource scopes preserve absence exact descriptors overlap and thrown identity", async () => {
@@ -906,7 +924,7 @@ test("actual lifecycle forwards preparation execution replacement retained expor
         ["runtime-close", "close"], ["witness-export", "materialize"]])
         assert.ok(resources.some(record => record.lifecycle === lifecycle && record.observation.operation === operation), `${lifecycle}/${operation}`);
       for (const record of resources) {
-        assert.equal(record.observation.schema, "logos/prepared-resource-observation/2");
+        assert.equal(record.observation.schema, "logos/prepared-resource-observation/3");
         assert.deepEqual(record.observation.hostMemory, { limitPages: 4095, pageBytes: 65536, limitBytes: 4095 * 65536 });
         assert.equal(record.observation.preparedInput.status, "observed");
         assert.ok(record.observation.preparedInput.limitBytes > 0);
@@ -950,7 +968,7 @@ test("actual Searcher creation distinguishes absent and compiled-disabled resour
       for (const entry of record.observation.exports) for (const snapshot of [entry.before, entry.after]) {
         assert.equal(snapshot.status, "disabled");
         assert.equal(snapshot.aggregateValid, false); assert.equal(snapshot.associationValid, false);
-        assert.equal(snapshot.words.length, 320);
+        assert.equal(snapshot.words.length, 8960);
       }
     }
     assert.equal(control.failures().length, 0);
