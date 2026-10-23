@@ -96,6 +96,31 @@ function wireIdentity(value: unknown) {
     sha256: status === "observed" ? digest(sha) : null, hashWallMs: number(data(source, "hashWallMs")) };
 }
 
+function hostMemory(value: unknown) {
+  const source = object(value, ["limitPages", "pageBytes", "limitBytes"]);
+  const limitPages = positive(data(source, "limitPages"), 65536);
+  const pageBytes = integer(data(source, "pageBytes"));
+  const limitBytes = positive(data(source, "limitBytes"));
+  if (pageBytes !== 65536 || limitBytes !== limitPages * pageBytes) return invalid();
+  // This is the selected cooperative host cap, not a module-declared maximum,
+  // current extent or evidence that an allocator growth attempt reached it.
+  return { limitPages, pageBytes, limitBytes };
+}
+
+function preparedInput(value: unknown) {
+  const source = object(value, ["status", "limitBytes", "reason"]);
+  const status = oneOf(data(source, "status"), ["observed", "unavailable", "invalid", "read-failed"] as const);
+  const bytes = data(source, "limitBytes"), reason = data(source, "reason");
+  if (status === "observed") {
+    if (reason !== null) return invalid();
+    return { status, limitBytes: positive(bytes, 0xffff_ffff), reason: null };
+  }
+  if (bytes !== null) return invalid();
+  const expected = status === "unavailable" ? ["missing-export", "instance-not-bound"] as const
+    : status === "invalid" ? ["invalid-scalar"] as const : ["export-threw"] as const;
+  return { status, limitBytes: null, reason: oneOf(reason, expected) };
+}
+
 function exportKey(value: unknown) {
   const source = object(value, ["export", "ordinal"]);
   return { export: oneOf(data(source, "export"), exports), ordinal: positive(data(source, "ordinal"), 0xffff_ffff) };
@@ -117,7 +142,7 @@ function exportObservation(value: unknown) {
  * No returned object/array aliases the host record. No input getters, iterator,
  * toJSON, source graph or Error fields participate in the serialized envelope. */
 export function copyPreparedResourceRecord(value: unknown) {
-  const source = object(value, ["schema", "mode", "searcher", "hostCall", "operation", "startedGeneration", "generation", "guestWindow",
+  const source = object(value, ["schema", "mode", "searcher", "hostCall", "operation", "startedGeneration", "generation", "hostMemory", "preparedInput", "guestWindow",
     "clock", "timeOriginMs", "startedAtMs", "finishedAtMs", "guestIdentity", "wire", "phase", "outcome", "encodingReturned",
     "inputAllocation", "inputAllocationReturned", "inputWritten", "exportEntry", "firstThrownExport", "exports", "droppedExports",
     "collectorValid", "collectorWallMs", "instanceSetupWallMs"]);
@@ -127,11 +152,12 @@ export function copyPreparedResourceRecord(value: unknown) {
   const phase = oneOf(data(source, "phase"), phases), outcome = oneOf(data(source, "outcome"), ["returned", "threw"] as const);
   if ((phase === "complete") !== (outcome === "returned")) return invalid();
   return {
-    schema: oneOf(data(source, "schema"), ["logos/prepared-resource-observation/1"] as const),
+    schema: oneOf(data(source, "schema"), ["logos/prepared-resource-observation/2"] as const),
     mode: oneOf(data(source, "mode"), ["minimal", "compiled-disabled"] as const),
     searcher: positive(data(source, "searcher")), hostCall: positive(data(source, "hostCall")),
     operation: oneOf(data(source, "operation"), operations),
     startedGeneration: positive(data(source, "startedGeneration")), generation: positive(data(source, "generation")),
+    hostMemory: hostMemory(data(source, "hostMemory")), preparedInput: preparedInput(data(source, "preparedInput")),
     guestWindow: window === null ? null : positive(window, 0xffff_ffff),
     clock: oneOf(data(source, "clock"), ["performance.now"] as const), timeOriginMs: number(data(source, "timeOriginMs")),
     startedAtMs, finishedAtMs, guestIdentity: identity(data(source, "guestIdentity")), wire: wireIdentity(data(source, "wire")),

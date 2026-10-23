@@ -201,7 +201,7 @@ uninstrumented runtime.
 ## Research 0046 resource observations
 
 This temporary adaptation forwards the paired host's
-`logos/prepared-resource-observation/1` records through the private
+`logos/prepared-resource-observation/2` records through the private
 `logos.prepared.resource-observer` symbol. An explicit
 `PREPARED_RESOURCE_OBSERVER_MODE=minimal` or `compiled-disabled` installs the
 matching own data property at `logos.prepared.resource-observer.mode` before
@@ -231,6 +231,19 @@ host reader; its `status`, `reason`, `association`, `aggregateValid` and
 and the ordinary transport outcome. Invalid/unavailable observations remain
 available to the supervisor rather than being relabelled successful samples.
 
+The closed `hostMemory` object carries positive integer `limitPages`, wasm32
+`pageBytes=65536` and their exact product `limitBytes`. The host binds this actual
+effective import/getter selection to its Searcher/generation, including instances
+replaced after traps. It is available without growth and with counters disabled;
+it does not replace module-declared limits, observed extent or growth records.
+The independent `preparedInput` object carries the actual guest input-guard
+scalar with `observed/limitBytes/null`, or a null limit with the exact status/reason
+pairs `unavailable/missing-export`, `unavailable/instance-not-bound`,
+`invalid/invalid-scalar`, or `read-failed/export-threw`. No source-level constant
+is filled in when that observation is unavailable. Extra/missing cap fields,
+inconsistent page/byte arithmetic and status/value/reason conflicts are refused.
+The old nested private schema has no fallback; the outer envelope remains version 1.
+
 Each envelope has format `thesmos/prepared-resource-observation/1`, its own
 sequence, the lifecycle activation/name, actual process ID, UTC timestamp and
 `performance.now()`/`performance.timeOrigin` clock coordinates. It records the
@@ -256,7 +269,7 @@ partial; no closing marker is synthesized. The supervisor must keep collector
 completeness/validity separate from permitted, forbidden, refused or unfinished
 logical outcomes.
 
-Seven new controls cover exact detached raw-word copying and all unavailable
+Eight resource controls cover exact detached raw-word copying and all unavailable
 statuses; hostile fields/getters/holes and bounds; absent mode, descriptor
 restoration and rejected reentry; actual remote envelope/I/O failure handling;
 a real law-only create/admit/execute/request-close/replacement/owner-close/old

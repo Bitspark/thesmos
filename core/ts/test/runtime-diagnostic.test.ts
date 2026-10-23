@@ -663,8 +663,10 @@ function resourceRecord(mode: "minimal" | "compiled-disabled" = "minimal"): Prep
     reason: null, association: mode === "minimal" ? "accepted" as const : "disabled" as const,
     memoryPages: 16, words: [...words], aggregateValid: mode === "minimal", associationValid: mode === "minimal" });
   return {
-    schema: "logos/prepared-resource-observation/1", mode, searcher: 7, hostCall: 9, operation: "admit",
+    schema: "logos/prepared-resource-observation/2", mode, searcher: 7, hostCall: 9, operation: "admit",
     startedGeneration: 1, generation: 1, guestWindow: 3, clock: "performance.now", timeOriginMs: 1000,
+    hostMemory: { limitPages: 32, pageBytes: 65536, limitBytes: 32 * 65536 },
+    preparedInput: { status: "observed", limitBytes: 123456, reason: null },
     startedAtMs: 2, finishedAtMs: 5,
     guestIdentity: { status: "observed", sha256: "8".repeat(64), hashWallMs: 0.125 },
     wire: { status: "observed", bytes: 128, sha256: "9".repeat(64), hashWallMs: 0.25 },
@@ -682,10 +684,14 @@ test("resource records copy exact fixed words and detached containers without co
   original.exports[0]!.after.words![32] = 0;
   original.exports[0]!.args[0] = 0;
   original.guestIdentity.sha256 = "a".repeat(64);
+  original.hostMemory.limitPages = 1;
+  original.preparedInput.limitBytes = 1;
   assert.equal(copied.exports[0]!.after.words![32], 0xffff_ffff);
   assert.equal(copied.exports[0]!.after.words![33], 0xffff_ffff);
   assert.deepEqual(copied.exports[0]!.args, [48, 128]);
   assert.equal(copied.guestIdentity.sha256, "8".repeat(64));
+  assert.equal(copied.hostMemory.limitPages, 32);
+  assert.equal(copied.preparedInput.limitBytes, 123456);
   for (const [status, reason] of [["unavailable", "missing-exports"], ["read-failed", "read-threw"],
     ["invalid", "header"], ["partial", "publication"]] as const) {
     const value = resourceRecord();
@@ -703,6 +709,23 @@ test("resource records copy exact fixed words and detached containers without co
 test("resource record grammar rejects getters holes extra graphs and out-of-domain fields", () => {
   const mutations: ((record: PreparedResourceRecord) => unknown)[] = [
     value => ({ ...value, schema: "other" }), value => ({ ...value, operation: "source-capture" }),
+    value => ({ ...value, schema: "logos/prepared-resource-observation/1" }),
+    value => { Reflect.deleteProperty(value, "hostMemory"); return value; },
+    value => { Reflect.deleteProperty(value, "preparedInput"); return value; },
+    ...["limitPages", "pageBytes", "limitBytes"].map(field => (value: PreparedResourceRecord) => {
+      Reflect.deleteProperty(value.hostMemory, field); return value;
+    }),
+    value => ({ ...value, hostMemory: { ...value.hostMemory, limitPages: 0 } }),
+    value => ({ ...value, hostMemory: { ...value.hostMemory, limitPages: 1.5 } }),
+    value => ({ ...value, hostMemory: { ...value.hostMemory, limitPages: 65537 } }),
+    value => ({ ...value, hostMemory: { ...value.hostMemory, pageBytes: 4096 } }),
+    value => ({ ...value, hostMemory: { ...value.hostMemory, limitBytes: value.hostMemory.limitBytes + 1 } }),
+    value => ({ ...value, hostMemory: { ...value.hostMemory, limitBytes: Number.MAX_SAFE_INTEGER + 1 } }),
+    value => ({ ...value, preparedInput: { ...value.preparedInput, limitBytes: 0 } }),
+    value => ({ ...value, preparedInput: { ...value.preparedInput, reason: "missing-export" } }),
+    value => ({ ...value, preparedInput: { status: "unavailable", limitBytes: 123456, reason: "missing-export" } }),
+    value => ({ ...value, preparedInput: { status: "invalid", limitBytes: null, reason: "export-threw" } }),
+    value => ({ ...value, preparedInput: { status: "read-failed", limitBytes: null, reason: "invalid-scalar" } }),
     value => ({ ...value, source: { secret: "must never serialize" } }),
     value => ({ ...value, hostCall: NaN }), value => ({ ...value, generation: 0 }),
     value => ({ ...value, outcome: "threw" }), value => ({ ...value, finishedAtMs: 1 }),
@@ -719,7 +742,7 @@ test("resource record grammar rejects getters holes extra graphs and out-of-doma
   ];
   for (const mutate of mutations) assert.throws(() => copyPreparedResourceRecord(mutate(resourceRecord())), TypeError);
   let invoked = 0;
-  for (const field of ["wire", "exports", "collectorWallMs"]) {
+  for (const field of ["wire", "exports", "collectorWallMs", "hostMemory", "preparedInput"]) {
     const value = resourceRecord();
     Object.defineProperty(value, field, { get() { invoked++; throw new Error("No getters"); }, enumerable: true });
     assert.throws(() => copyPreparedResourceRecord(value), TypeError);
@@ -727,8 +750,33 @@ test("resource record grammar rejects getters holes extra graphs and out-of-doma
   const value = resourceRecord();
   Object.defineProperty(value.exports[0]!.after.words!, "4", { get() { invoked++; return 0; } });
   assert.throws(() => copyPreparedResourceRecord(value), TypeError);
+  for (const [field, key] of [["hostMemory", "limitPages"], ["preparedInput", "limitBytes"]] as const) {
+    const nested = resourceRecord();
+    Object.defineProperty(nested[field], key, { get() { invoked++; return 1; }, enumerable: true });
+    assert.throws(() => copyPreparedResourceRecord(nested), TypeError);
+  }
   assert.throws(() => copyPreparedResourceRecord({ ...resourceRecord(), toJSON() { invoked++; return {}; } }), TypeError);
   assert.equal(invoked, 0);
+});
+
+test("resource cap and input-guard provenance remain separate from counters and extent", () => {
+  for (const mode of ["minimal", "compiled-disabled"] as const) {
+    for (const [status, reason] of [["unavailable", "missing-export"], ["unavailable", "instance-not-bound"],
+      ["invalid", "invalid-scalar"], ["read-failed", "export-threw"]] as const) {
+      const value = resourceRecord(mode);
+      value.preparedInput = { status, limitBytes: null, reason };
+      assert.deepEqual(copyPreparedResourceRecord(value), value);
+    }
+    const replacement = resourceRecord(mode);
+    replacement.startedGeneration = 2; replacement.generation = 2;
+    const detached = copyPreparedResourceRecord(replacement);
+    assert.equal(detached.searcher, 7); assert.equal(detached.generation, 2);
+    assert.equal(detached.hostMemory.limitPages, 32);
+    // A cooperative cap does not rewrite an observed extent or imply that the
+    // fixed raw growth fields (all zero in this shape control) observed it.
+    replacement.exports[0]!.after.memoryPages = 33;
+    assert.equal(copyPreparedResourceRecord(replacement).exports[0]!.after.memoryPages, 33);
+  }
 });
 
 test("resource scopes preserve absence exact descriptors overlap and thrown identity", async () => {
@@ -827,7 +875,7 @@ test("actual lifecycle forwards preparation execution replacement retained expor
     process.env.PREPARED_RESOURCE_OBSERVER_MODE = "minimal";
     const root = atom("resource-root"), marker = "do-not-retain-query-graph-in-resource-records";
     const query = { actor: root, statement: atom(marker), space: path() };
-    const runtime = await createSpacesRuntime({ root, bundles: [], authenticate: () => true,
+    const runtime = await createSpacesRuntime({ root, bundles: [], authenticate: () => true, memoryLimitPages: 4095,
       preparationBudget: { maxBundles: 1, maxClauses: 1000, maxPayloadBytes: 1024 * 1024 } });
     let request: Awaited<ReturnType<typeof runtime.request>> | undefined;
     let result: SpacesRuntimeDecision | undefined;
@@ -851,6 +899,11 @@ test("actual lifecycle forwards preparation execution replacement retained expor
         ["runtime-close", "close"], ["witness-export", "materialize"]])
         assert.ok(resources.some(record => record.lifecycle === lifecycle && record.observation.operation === operation), `${lifecycle}/${operation}`);
       for (const record of resources) {
+        assert.equal(record.observation.schema, "logos/prepared-resource-observation/2");
+        assert.deepEqual(record.observation.hostMemory, { limitPages: 4095, pageBytes: 65536, limitBytes: 4095 * 65536 });
+        assert.equal(record.observation.preparedInput.status, "observed");
+        assert.ok(record.observation.preparedInput.limitBytes > 0);
+        assert.equal(record.observation.preparedInput.reason, null);
         assert.equal(record.observation.mode, "minimal");
         assert.equal(record.observation.guestIdentity.status, "observed");
         assert.match(record.observation.guestIdentity.sha256, /^[a-f0-9]{64}$/);
@@ -869,7 +922,7 @@ test("actual lifecycle forwards preparation execution replacement retained expor
 
 test("actual Searcher creation distinguishes absent and compiled-disabled resource modes", async () => {
   await remoteControl("actual resource modes", async control => {
-    const config = { root: atom("resource-mode-root"), bundles: [], authenticate: () => true,
+    const config = { root: atom("resource-mode-root"), bundles: [], authenticate: () => true, memoryLimitPages: 4094,
       preparationBudget: { maxBundles: 1, maxClauses: 1000, maxPayloadBytes: 1024 * 1024 } };
     const absent = await createSpacesRuntime(config);
     absent.close();
@@ -882,6 +935,10 @@ test("actual Searcher creation distinguishes absent and compiled-disabled resour
     assert.ok(records.length > 0);
     for (const record of records) {
       assert.equal(record.observation.mode, "compiled-disabled");
+      assert.deepEqual(record.observation.hostMemory, { limitPages: 4094, pageBytes: 65536, limitBytes: 4094 * 65536 });
+      assert.equal(record.observation.preparedInput.status, "observed");
+      assert.ok(record.observation.preparedInput.limitBytes > 0);
+      assert.equal(record.observation.preparedInput.reason, null);
       assert.ok(record.observation.exports.length > 0);
       for (const entry of record.observation.exports) for (const snapshot of [entry.before, entry.after]) {
         assert.equal(snapshot.status, "disabled");
