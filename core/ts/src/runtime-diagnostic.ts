@@ -420,9 +420,16 @@ export function finalizePreparedResourceRetention(code: number): void {
   resourceSequence = 0;
   process.removeListener("exit", resourceRetentionExit);
   if (current === undefined) return;
+  const retentionFailure = () => {
+    // This exit hook must not replace an already failed product's actual exit.
+    // The separate marker still invalidates the collector; an otherwise zero
+    // exit still becomes nonzero through the existing diagnostic policy.
+    diagnosticFailure(0, "resource-retention", "finalize-failed");
+    if (Number.isSafeInteger(code) && code !== 0) process.exitCode = code;
+  };
   try {
-    if (!current.sink.finalize(code)) diagnosticFailure(0, "resource-retention", "finalize-failed");
-  } catch { diagnosticFailure(0, "resource-retention", "finalize-failed"); }
+    if (!current.sink.finalize(code)) retentionFailure();
+  } catch { retentionFailure(); }
 }
 
 export function runtimePhase<T>(id: number, phase: string, operation: () => T): T {

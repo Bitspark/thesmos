@@ -124,6 +124,9 @@ separate diagnostic failures; no sink operation replaces a product exception
 or prevents cleanup. Independent readers must verify all raw references and
 join the diagnostic failure sidecar and final process status: a last persisted
 checkpoint cannot attest a later failed coverage close or an unwritable update.
+The exit finalizer preserves an already nonzero product exit code while adding
+that independent failure marker; collector failure after an otherwise zero exit
+still makes the process fail. The coverage checkpoint cannot override either.
 Outer artifact custody must hash the entire physical prefix file including a
 failed opaque suffix; its whole-file hash is not the complete-prefix hash.
 No temporary files or unbounded failed-write member names are created. Readers

@@ -909,37 +909,68 @@ test("resource forwarding binds actual remote context and refuses malformed or u
 });
 
 test("selected resource retention finalizes at actual child exit without changing a caught product failure", async () => {
-  await remoteControl("resource real exit", async control => {
+  for (const [productExit, closeFails] of [[7, false], [7, true], [0, true]] as const) await remoteControl(`resource real exit ${productExit} ${closeFails}`, async control => {
     const environment = { ...process.env, PREPARED_RESOURCE_OBSERVER_MODE: "minimal" };
     // The real GitHub context is inherited unchanged. Only this owned output
     // directory and existing fixture identities were selected by remoteControl.
     const moduleUrl = new URL("../src/runtime-diagnostic.js", import.meta.url).href;
     const program = `
-      import { readFileSync } from 'node:fs';
+      import fs from 'node:fs';
+      import { join } from 'node:path';
+      import { syncBuiltinESMExports } from 'node:module';
       import { diagnosticPreparedSync } from ${JSON.stringify(moduleUrl)};
-      const record = JSON.parse(readFileSync(0, 'utf8'));
+      const record = JSON.parse(fs.readFileSync(0, 'utf8'));
+      const productExit = ${productExit}, closeFails = ${closeFails};
+      const target = join(process.env.RUNNER_TEMP, 'prepared-spaces', 'runtime-resources-coverage.json');
+      const originalOpen = fs.openSync, originalClose = fs.closeSync;
+      let coverageFd;
+      if (closeFails) {
+        fs.openSync = function (...args) {
+          const fd = Reflect.apply(originalOpen, this, args);
+          if (args[0] === target) coverageFd = fd;
+          return fd;
+        };
+        fs.closeSync = function (fd) {
+          if (fd !== coverageFd) return originalClose(fd);
+          try { originalClose(fd); }
+          finally { fs.openSync = originalOpen; fs.closeSync = originalClose; syncBuiltinESMExports(); }
+          process.stderr.write('CONTROL_RESOURCE_CLOSE_AFTER_REAL_CLOSE\\n');
+          throw new Error('Controlled late coverage close failure');
+        };
+        syncBuiltinESMExports();
+      }
       const primary = { exact: 'product-failure-control' };
       let cleaned = false;
       try {
-        diagnosticPreparedSync('request', () => {
+        const result = diagnosticPreparedSync('request', () => {
           const sink = Object.getOwnPropertyDescriptor(globalThis, Symbol.for('logos.prepared.resource-observer')).value;
-          try { sink(record); throw primary; } finally { cleaned = true; }
+          try { sink(record); if (productExit !== 0) throw primary; return primary; } finally { cleaned = true; }
         });
+        if (result !== primary || !cleaned) throw new Error('Product result/cleanup changed');
       } catch (error) {
         if (error !== primary || !cleaned) throw new Error('Product failure/cleanup changed');
-        process.exitCode = 7;
+        process.exitCode = productExit;
       }
     `;
     const child = spawnSync(process.execPath, ["--input-type=module", "-e", program], {
       env: environment, input: JSON.stringify(resourceRecord()), encoding: "utf8", timeout: 10000, maxBuffer: 65536,
     });
-    assert.equal(child.error, undefined); assert.equal(child.signal, null); assert.equal(child.status, 7);
+    assert.equal(child.error, undefined); assert.equal(child.signal, null);
+    assert.equal(child.status, productExit || 1, "late collector failure preserves an already nonzero product exit");
     const coverage = JSON.parse(readFileSync(join(control.directory, "prepared-spaces", "runtime-resources-coverage.json"), "utf8"));
     assert.equal(coverage.prefix.rows, 1); assert.equal(coverage.status, "complete");
-    assert.deepEqual(coverage.finalization, { status: "exit-observed", exitCode: 7 });
+    assert.deepEqual(coverage.finalization, { status: "exit-observed", exitCode: productExit });
     assert.equal(coverage.authority.productOutcome, "not-assessed");
-    assert.deepEqual(control.failures(), []);
-    assert.ok(control.records().some(record => record.phase === "request" && record.edge === "failed"));
+    if (closeFails) {
+      assert.match(child.stderr, /CONTROL_RESOURCE_CLOSE_AFTER_REAL_CLOSE/);
+      assert.deepEqual(control.failures(), [{ format: "thesmos/cold-runtime-diagnostic-failure/1", activation: 0,
+        phase: "resource-retention", edge: "finalize-failed" }],
+      "the independent failure channel must reject a checkpoint written before the failed close");
+    } else {
+      assert.doesNotMatch(child.stderr, /CONTROL_RESOURCE_CLOSE_AFTER_REAL_CLOSE/);
+      assert.deepEqual(control.failures(), []);
+    }
+    assert.ok(control.records().some(record => record.phase === "request" && record.edge === (productExit ? "failed" : "complete")));
   });
 });
 
