@@ -16,10 +16,12 @@ dependency `@bitspark/logos-kernel@0.24.0` are currently private GitHub packages
 This source preview is not a public npm release. Other dependencies are public.
 
 The [v1.0.0-preview.3 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.3)
-provides the qualified archive, exact CI evidence and SHA-256 checksum. It adds
-proof pruning, the `memoryLimitPages` option on Logos 0.24.0 and the entry-isolation
-gate to preview.2's optional `/identity` entry. Its complete gate preserved all
-eight frozen artifacts. Consumers need the stated Logos access; release
+provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
+of preview.2, which added the optional `/identity` entry, it adds proof pruning,
+the `memoryLimitPages` option and the entry-isolation gate. It requires Logos
+0.24.0 (preview.2 used 0.23.0), so consumers moving to it also move their Logos
+packages. Its complete gate passed 100 tests and preserved all eight frozen
+artifacts. Consumers need the stated Logos access; release
 archives bundle no private dependency code. The `/client` and `/archon` entries
 still require their optional peers at the versions below.
 
@@ -67,8 +69,9 @@ than a `ProofSearchError`. Neither reason proves the operation
 is prohibited.
 
 From preview.3, a returned proof carries only the bundles its derivation uses,
-each unchanged. The immutable preview.1 and preview.2 archives carry all supplied
-bundles.
+each unchanged, and its `bundle/<i>/<j>` clause references are renumbered to the
+kept bundles' positions. The immutable preview.1 and preview.2 archives carry all
+supplied bundles.
 Pruning works per bundle: a used bundle is disclosed in full, because it is
 signed as one payload. An asserter that needs finer disclosure, or wants a
 change to one record to leave other proofs intact, should keep records that

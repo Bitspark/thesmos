@@ -70,7 +70,8 @@ is deselected, a proof carrying it fails membership even if another route could
 justify the query. Reprove using the surviving selection. From
 `v1.0.0-preview.3`, [PR17](https://github.com/Bitspark/thesmos/pull/17) prunes
 unused bundles, retaining used bundles whole and unchanged. The immutable
-preview.2 archive does not prune; a consumer adopts pruning by moving to preview.3.
+preview.2 archive does not prune; a consumer adopts pruning by moving to preview.3,
+which also requires Logos 0.24.0.
 
 Qualification pairs successful full native chains with removed author,
 supplier and conditional support; tests source replay, independent alternatives,
