@@ -67,10 +67,10 @@ fence; stronger guarantees require an operation-specific protocol.
 
 The released `v1.0.0-preview.2` prover includes all supplied bundles. After one
 is deselected, a proof carrying it fails membership even if another route could
-justify the query. Reprove using the surviving selection. Later source
-[PR17](https://github.com/Bitspark/thesmos/pull/17) prunes unused bundles on
-`main`, retaining used bundles whole and unchanged. That source change is not
-in the immutable preview.2 archive; consumer adoption needs a qualified release.
+justify the query. Reprove using the surviving selection. From
+`v1.0.0-preview.3`, [PR17](https://github.com/Bitspark/thesmos/pull/17) prunes
+unused bundles, retaining used bundles whole and unchanged. The immutable
+preview.2 archive does not prune; a consumer adopts pruning by moving to preview.3.
 
 Qualification pairs successful full native chains with removed author,
 supplier and conditional support; tests source replay, independent alternatives,
