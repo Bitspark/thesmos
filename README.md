@@ -15,7 +15,7 @@ available:** the required `@bitspark/logos-contract@0.24.0` and optional client
 dependency `@bitspark/logos-kernel@0.24.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
-The [v1.0.0-preview.4 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.4)
+The [v1.0.0-preview.5 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.5)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
 of preview.3 (proof pruning, the `memoryLimitPages` option on Logos 0.24.0 and
 the entry-isolation gate), it adds the optional `/remote` entry for remote proof
@@ -93,7 +93,7 @@ verify the returned proof locally exactly as above; see
 [remote proof production](docs/remote-proofs.md).
 
 The receiver imports no search engine. The client requires Logos kernel, and
-the Archon adapter requires `@bitspark/archon@0.15.0`; both are optional peers.
+the Archon adapter requires `@bitspark/archon@0.16.0`; both are optional peers.
 Custom authentication can implement the small callback instead. The adapter
 uses Archon's Ed25519ph context `thesmos/space-facts/v1`, exact Ontos payload
 bytes, public-key atoms and signature atoms. It adds no authority policy.
