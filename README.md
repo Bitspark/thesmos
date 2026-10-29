@@ -70,6 +70,17 @@ ceiling is 256 MiB by default; `memoryLimitPages` raises it to at most 1 GiB
 than a `ProofSearchError`. Neither reason proves the operation
 is prohibited.
 
+A proof-producing host may explicitly supply `search` to `prove`,
+`answerProofRequest` or `createLocalProofProvider`. This function uses Logos's
+existing `embedQuery` request/outcome contract; its default remains `embedQuery`.
+This lets the host select a separately qualified native producer while keeping
+the same frozen program, clause mapping, signed-bundle pruning and proof encoding.
+No other implementation is tried if the selected producer fails. The host owns
+its executable identity, process isolation and hard cancellation. Guest-specific
+options such as `memoryLimitPages` must be supported or rejected explicitly by
+that implementation. A remote caller cannot select the host's search function;
+the remote wire and the consumer's independent verifier are unchanged.
+
 From preview.3, a returned proof carries only the bundles its derivation uses,
 each unchanged, and its `bundle/<i>/<j>` clause references are renumbered to the
 kept bundles' positions. The immutable preview.1 and preview.2 archives carry all

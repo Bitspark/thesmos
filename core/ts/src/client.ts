@@ -30,6 +30,17 @@ export interface ProveRequest {
    * Logos throw a `RangeError` before any search, not a `ProofSearchError`.
    */
   readonly memoryLimitPages?: EmbedRequest["memoryLimitPages"];
+  /**
+   * Explicit Logos query implementation, defaulting to `embedQuery`. A host can supply a native
+   * producer with the same request/outcome contract. No fallback is attempted when it fails;
+   * process isolation, hard cancellation and executable qualification belong to that host.
+   */
+  readonly search?: typeof embedQuery;
+}
+
+function queryImplementation(search: typeof embedQuery | undefined): typeof embedQuery {
+  if (search !== undefined && typeof search !== "function") throw new TypeError("search must be a Logos query function");
+  return search ?? embedQuery;
 }
 
 /** The failure `prove` throws when it returns no proof. `cause` is the Logos outcome unchanged. */
@@ -43,10 +54,11 @@ export class ProofSearchError extends Error {
 
 /** Search is entirely Logos's. A failed search is not a proof of prohibition. */
 export async function prove(request: ProveRequest, signal?: AbortSignal): Promise<Uint8Array> {
+  const search = queryImplementation(request.search);
   const program = suppliedProgram(request.bundles);
   const anchor = inputLiteral(fact("root", request.root));
   const query = inputLiteral(authorization(request.query.actor, request.query.statement, request.query.space));
-  const outcome = await embedQuery({
+  const outcome = await search({
     rules: program.entries().map(([, clause]) => clause),
     facts: [anchor], goal: query.toGoal(), limits: request.limits, memoryLimitPages: request.memoryLimitPages,
   }, signal);
@@ -123,6 +135,8 @@ export interface AnswerOptions {
    */
   readonly revalidate?: () => Revalidation | Promise<Revalidation>;
   readonly memoryLimitPages?: EmbedRequest["memoryLimitPages"];
+  /** Host-selected Logos query implementation; never selected by the remote request. */
+  readonly search?: typeof embedQuery;
   /** Cooperative cancellation of the search. Terminating a worker remains the provider's own job. */
   readonly signal?: AbortSignal;
 }
@@ -148,6 +162,7 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
   if (options.authenticate !== null && typeof options.authenticate !== "function") {
     throw new TypeError("answerProofRequest needs an explicit authenticate function or null");
   }
+  const search = queryImplementation(options.search);
   if (options.elapsedMs !== undefined && (typeof options.elapsedMs !== "number" || !Number.isFinite(options.elapsedMs) || options.elapsedMs < 0)) {
     throw new TypeError("elapsedMs must be a finite, non-negative number");
   }
@@ -193,7 +208,7 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
   try {
     proof = await prove({
       root: request.root, query: request.query, bundles: [...supplied, ...selected],
-      limits, memoryLimitPages: options.memoryLimitPages,
+      limits, memoryLimitPages: options.memoryLimitPages, search,
     }, options.signal);
   } catch (error) {
     if (error instanceof ProofSearchError) return failure(error.reason);
@@ -219,11 +234,12 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
   return { kind: "proof", proof, observations };
 }
 
-/** The local twin of a remote provider: the same interface, with Logos in this process. */
+/** The host-side twin of a remote provider: the same interface, using its configured Logos search. */
 export function createLocalProofProvider(options: Omit<AnswerOptions, "signal" | "elapsedMs">): ProofProvider {
   if (options.authenticate !== null && typeof options.authenticate !== "function") {
     throw new TypeError("createLocalProofProvider needs an explicit authenticate function or null");
   }
+  queryImplementation(options.search);
   return Object.freeze({
     async produce(request: ProofRequest, signal?: AbortSignal): Promise<ProducedProof> {
       signal?.throwIfAborted();
