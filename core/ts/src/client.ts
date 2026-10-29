@@ -152,12 +152,17 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
     throw new TypeError("elapsedMs must be a finite, non-negative number");
   }
   if (options.ceilings && !wholeHints(options.ceilings)) throw new TypeError("ceilings must be whole, non-negative numbers");
+  const pages = options.memoryLimitPages;
+  if (pages !== undefined && !(Number.isSafeInteger(pages) && pages >= 1 && pages <= 16_384)) {
+    throw new RangeError("memoryLimitPages must be an integer from 1 to 16384");
+  }
   if (request.budget && !wholeHints(request.budget)) return failure("invalid_request", "budget hints must be whole, non-negative numbers");
   const supplied = request.bundles ?? [], selected = options.bundles ?? [];
   // The caller's inputs are checked on their own first, so a fault is attributed to whoever
   // supplied it: a malformed supplied bundle is the caller's `invalid_request`, while a fault in
   // the provider's own selection is rethrown for the provider to report.
   for (const bundle of supplied) {
+    if (!(bundle?.payload instanceof Uint8Array)) return failure("invalid_request", "a supplied bundle is malformed");
     if (bundle.payload.byteLength > protocol.limits.maxProofBytes) return failure("limit_exceeded", "a supplied bundle exceeds the bundle size limit");
     let supplier;
     try { supplier = decodeSpaceFacts(bundle.payload).supplier; } catch { return failure("invalid_request", "a supplied bundle is malformed"); }
@@ -195,7 +200,7 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
     if (error instanceof ProofLimit) return failure("limit_exceeded", "the supplied and selected evidence exceeds the clause limit");
     throw error; // A fault in the provider's selection or the engine is the provider's to report.
   }
-  // The receiver's verifier rejects any proof over the protocol's byte limit; say so here instead.
+  // The receiver's verifier rejects any proof over the protocol's proof limits; say so here instead.
   let carried;
   try { carried = decodeProof(proof).bundles; } catch (error) {
     if (error instanceof ProofLimit) return failure("limit_exceeded", "the proof exceeds the protocol's proof limits");
@@ -219,12 +224,13 @@ export function createLocalProofProvider(options: Omit<AnswerOptions, "signal" |
   if (options.authenticate !== null && typeof options.authenticate !== "function") {
     throw new TypeError("createLocalProofProvider needs an explicit authenticate function or null");
   }
-  // Per-request values never come from construction, even when passed through an untyped object.
-  const { signal: _signal, elapsedMs: _elapsed, ...fixed } = options as AnswerOptions;
   return Object.freeze({
     async produce(request: ProofRequest, signal?: AbortSignal): Promise<ProducedProof> {
       signal?.throwIfAborted();
-      const result = await answerProofRequest(request, signal ? { ...fixed, signal } : fixed);
+      // Per-request values never come from construction, even through an untyped object. The call
+      // inherits everything else from the caller's options, so getters and prototypes stay live.
+      const perCall = Object.create(options, { elapsedMs: { value: undefined }, signal: { value: signal } }) as AnswerOptions;
+      const result = await answerProofRequest(request, perCall);
       // Caller cancellation rejects with the caller's own reason, as the HTTP provider does.
       signal?.throwIfAborted();
       if (result.kind === "failure") throw new ProofProviderError(result.code, result.detail);

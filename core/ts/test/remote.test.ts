@@ -410,6 +410,22 @@ test("search outcomes, provider ceilings and deadlines stay distinct from refusa
     assert.deepEqual(await answerProofRequest({ root: docsRoot, query: renameQuery, bundles: [publicBundle],
       budget: { memoryBytes: 1.5 } }, { authenticate: authenticateArchon }),
       { kind: "failure", code: "invalid_request", detail: "budget hints must be whole, non-negative numbers" });
+    // A supplied entry without bytes is the caller's malformed input, not a thrown error.
+    assert.deepEqual(await answerProofRequest({ root: docsRoot, query: renameQuery,
+      bundles: [{ authentication: atom("x") } as unknown as SpaceFactsBundle] }, { authenticate: authenticateArchon }),
+      { kind: "failure", code: "invalid_request", detail: "a supplied bundle is malformed" });
+    // The provider's engine configuration is checked before any caller input.
+    await assert.rejects(answerProofRequest({ root: docsRoot, query: renameQuery,
+      bundles: [{ authentication: atom("x") } as unknown as SpaceFactsBundle] },
+      { authenticate: authenticateArchon, memoryLimitPages: 0 }), RangeError);
+    // The local provider reads its options per call, so getters and prototype-held options stay live.
+    let current: readonly SpaceFactsBundle[] = [];
+    const live = createLocalProofProvider(Object.create({ authenticate: authenticateArchon },
+      { bundles: { get: () => current } }) as Parameters<typeof createLocalProofProvider>[0]);
+    await assert.rejects(live.produce({ root: docsRoot, query: renameQuery, bundles: [publicBundle] }), failsWith("exhausted"));
+    current = [teamRecords];
+    assert.equal(docsVerifier.verify({ query: renameQuery, proof: (await live.produce({ root: docsRoot, query: renameQuery,
+      bundles: [publicBundle] })).proof }).permitted, true);
     // Per-request values never come from construction, even through an untyped options object.
     const loose = { bundles: [teamRecords], authenticate: authenticateArchon, elapsedMs: 1000 } as Parameters<typeof createLocalProofProvider>[0];
     assert.equal(docsVerifier.verify({ query: renameQuery, proof: (await createLocalProofProvider(loose)

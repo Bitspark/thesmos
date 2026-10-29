@@ -119,16 +119,17 @@ const result = await answerProofRequest(request, {
 `answerProofRequest` authenticates every supplied bundle with the given function and answers
 `invalid_request` for any it does not accept; it requires an explicit `authenticate`, function or
 `null`, rather than a default. A malformed supplied bundle is the caller's `invalid_request`
-with fixed, safe detail; a fault in the provider's own selected evidence or in the engine is
+with fixed, safe detail, and one over the bundle size limit is `limit_exceeded`; a fault in the provider's own selected evidence or in the engine is
 thrown for the provider to report, never blamed on the caller. Observations are returned only
 when the proof carries at least one of the provider's selected bundles. A supplied copy of a bundle the provider no longer selects remains
 the caller's input and is never reported as part of the provider's selection. When the proof
 uses selected evidence, `revalidate` runs before release: `false` gives `evidence_changed` and
 `"evidence_unavailable"` (the re-read failed) gives that code; neither releases a proof. A proof
-over the protocol's byte limit is `limit_exceeded`. `elapsedMs` must be finite and non-negative;
+over the protocol's proof limits (size, depth or nodes) is `limit_exceeded`. `elapsedMs` must be finite and non-negative;
 the remaining budget is floored to whole milliseconds, which counts a fractional elapsed
 reading up, never granting time already spent. Budget hints and provider ceilings must be
-whole, non-negative numbers: a caller's malformed hint is `invalid_request`, a provider's is
+whole, non-negative numbers, with deadlines at most 2,147,483,647 ms: a caller's malformed hint
+is `invalid_request`; a provider's malformed ceiling, `elapsedMs` or `memoryLimitPages` is
 thrown.
 Aborting the client's wait or the helper's `signal` is cooperative; enforcing worker deadlines,
 memory limits, termination and cleanup is the provider's responsibility. The helper makes no
