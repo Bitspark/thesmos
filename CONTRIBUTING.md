@@ -38,4 +38,9 @@ access; see README.md. Never commit a credential or an npm configuration
 containing one. Public package publication waits for an anonymous dependency
 installation test. No public npm release is implied by a source preview.
 
+For a dependency update, the `check` workflow's `refresh_lock` dispatch prepares
+the lockfile on its runner and retains it as `thesmos-lock-<source revision>`.
+Commit that artifact with the manifest, then run the ordinary complete gate on
+the resulting revision. Lock preparation alone never qualifies a release.
+
 Contributions are licensed under Apache-2.0.

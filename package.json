@@ -1,6 +1,6 @@
 {
   "name": "@bitspark/thesmos",
-  "version": "1.0.0-preview.4",
+  "version": "1.0.0-preview.5",
   "description": "The Spaces authority law, with local Logos proof verification and an optional proof client.",
   "license": "Apache-2.0",
   "type": "module",
@@ -30,7 +30,7 @@
     "@bitspark/ontos-data": "0.13.0"
   },
   "peerDependencies": {
-    "@bitspark/archon": "0.15.0",
+    "@bitspark/archon": "0.16.0",
     "@bitspark/logos-kernel": "0.24.0"
   },
   "peerDependenciesMeta": {
@@ -38,7 +38,7 @@
     "@bitspark/logos-kernel": { "optional": true }
   },
   "devDependencies": {
-    "@bitspark/archon": "0.15.0",
+    "@bitspark/archon": "0.16.0",
     "@bitspark/logos-kernel": "0.24.0",
     "@types/node": "24.0.0",
     "typescript": "5.9.3"
