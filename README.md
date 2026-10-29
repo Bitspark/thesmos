@@ -118,7 +118,7 @@ receiver can acquire applicable bundles without adding policy to the law.
 
 | Location | Responsibility |
 | --- | --- |
-| [law/](law/common-law.logos) | Frozen common law and compiled Ontos data; separate asserter template |
+| [law/](law/common-law.logos) | Frozen common law and compiled Ontos data; separate asserter template. Embedded into the library at build time, so the root, `/identity` and `/remote` read no files at runtime |
 | [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter; `/identity` issuer/subject profile; `/remote` proof-provider contract and HTTP adapter |
 | [conformance/](conformance/frozen.json) | Frozen artifact pins; original corpus is `law/conformance.ontos` |
 | [core/ts/test/](core/ts/test/sdk.test.ts) | Core, asserter, mutation and client tests |

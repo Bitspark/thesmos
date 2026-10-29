@@ -3,7 +3,7 @@ import {
 } from "@bitspark/logos-contract";
 import { decode, encode } from "@bitspark/ontos-codec";
 import { encodeInt, encodeText, readInt, readText } from "@bitspark/ontos-data";
-import protocol from "@bitspark/thesmos/law/protocol.json" with { type: "json" };
+import { protocol } from "./law.generated.js";
 import { proofProviderFailures, type ProofProviderFailure } from "./failure.js";
 import type { Query, SpaceFactsBundle } from "./types.js";
 

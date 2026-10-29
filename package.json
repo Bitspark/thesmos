@@ -17,7 +17,7 @@
   "files": ["dist/core/ts/src", "law", "README.md", "LICENSE", "NOTICE"],
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/", "provenance": true },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/embed-law.mjs && tsc -p tsconfig.json",
     "test": "npm run build && node --test dist/core/ts/test/*.test.js",
     "law:check": "node scripts/compile-law.ts --check && node scripts/check-frozen.mjs",
     "check": "npm run law:check && npm test && npm run example && node scripts/check-package.mjs && node scripts/check-links.mjs && git diff --check",

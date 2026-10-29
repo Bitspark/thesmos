@@ -12,6 +12,7 @@ import { confer, deviceProof, documentProof, releaseProof, ROOT, rootCounts, roo
 import { DocumentService, DeviceService, ReleaseService } from "./fixtures/services.js";
 import { authenticateExampleFacts } from "./fixtures/authentication.js";
 import { protocol } from "../src/data.js";
+import { assertionTemplateBytes, commonLawBytes, protocol as embeddedProtocol, spaceAsserterTemplateBytes } from "../src/law.generated.js";
 import { attributedClause, executableClause, literalValue } from "../src/encoding.js";
 import { ProofBuilder } from "../test/recipes.js";
 
@@ -20,6 +21,15 @@ const cases = decodeCases(readFileSync(require.resolve("@bitspark/thesmos/law/co
 for (const fixture of cases) test(fixture.name + ": " + fixture.why, () => {
   const result = createSpacesVerifier({ root: fixture.root, authenticate: authenticateExampleFacts }).verify({ query: fixture.query, proof: fixture.proof });
   assert.equal(result.permitted, fixture.permitted, JSON.stringify(result));
+});
+
+test("the embedded law is exactly the frozen law/ artifacts", () => {
+  const file = (name: string) => new Uint8Array(readFileSync(require.resolve(`@bitspark/thesmos/law/${name}`)));
+  assert.deepEqual(commonLawBytes, file("common-law.ontos"));
+  assert.deepEqual(assertionTemplateBytes, file("assertion-template.ontos"));
+  assert.deepEqual(spaceAsserterTemplateBytes, file("layers/space-asserter-template.ontos"));
+  assert.deepEqual(embeddedProtocol, JSON.parse(readFileSync(require.resolve("@bitspark/thesmos/law/protocol.json"), "utf8")));
+  assert.equal(protocol, embeddedProtocol);
 });
 
 test("sample services execute only the operation whose query the proof establishes", () => {
