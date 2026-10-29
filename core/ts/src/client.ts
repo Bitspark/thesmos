@@ -7,7 +7,7 @@ import { lawDigest, layerDigest } from "./data.js";
 import { authorization, fact, inputLiteral } from "./encoding.js";
 import { ProofProviderError, type ProofProviderFailure, type ProofSearchFailure } from "./failure.js";
 import { suppliedProgram } from "./program.js";
-import { encodeProof, ProofLimit } from "./proof.js";
+import { decodeProof, encodeProof, ProofLimit } from "./proof.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
 import type {
   ProducedProof, ProofBudget, ProofProvider, ProofRequest, ProofResult, SourceObservation,
@@ -89,15 +89,31 @@ export async function prove(request: ProveRequest, signal?: AbortSignal): Promis
 }
 
 export interface AnswerOptions {
-  /** Bundles the provider selected and may disclose, added after the caller's supplied ones. */
+  /**
+   * Bundles the provider selected and may disclose, added after the caller's supplied ones. The
+   * provider decides which supplied bundles it admits; a supplied copy of a bundle it no longer
+   * selects is the caller's input, never part of its current selection.
+   */
   readonly bundles?: readonly SpaceFactsBundle[];
-  /** When set, every supplied bundle must authenticate, or the request is `invalid_request`. */
-  readonly authenticate?: AuthenticateSpaceFacts;
-  /** Descriptive source positions returned with a proof. */
+  /**
+   * Required, explicit: how supplied bundles are authenticated before search. A function rejects
+   * any supplied bundle it does not accept as `invalid_request`. `null` skips the check; receivers
+   * still authenticate every bundle a proof carries.
+   */
+  readonly authenticate: AuthenticateSpaceFacts | null;
+  /** Descriptive positions of the provider-selected evidence, returned with a proof. */
   readonly observations?: readonly SourceObservation[];
   /** The provider's ceilings. A request's budget may lower them, never raise them. */
   readonly ceilings?: ProofBudget;
+  /** Time already spent on this request since receipt, such as queueing, deducted from its deadline. */
+  readonly elapsedMs?: number;
+  /**
+   * Called after a successful search, before the proof is released. Returning false, for example
+   * because the selection or the caller's disclosure authority changed, yields `evidence_changed`.
+   */
+  readonly revalidate?: () => boolean | Promise<boolean>;
   readonly memoryLimitPages?: EmbedRequest["memoryLimitPages"];
+  /** Cooperative cancellation of the search. Terminating a worker remains the provider's own job. */
   readonly signal?: AbortSignal;
 }
 
@@ -110,42 +126,64 @@ const lowest = (a: number | undefined, b: number | undefined) =>
  * Answer one proof request with the existing producer. A provider calls this after its own caller
  * authentication, disclosure checks and record selection; it adds no authority decision.
  */
-export async function answerProofRequest(request: ProofRequest, options: AnswerOptions = {}): Promise<ProofResult> {
-  const supplied = request.bundles ?? [];
-  if (options.authenticate) {
-    for (const bundle of supplied) {
-      let supplier;
-      try { supplier = decodeSpaceFacts(bundle.payload).supplier; } catch { return failure("invalid_request", "a supplied bundle is malformed"); }
-      if (options.authenticate({ ...bundle, supplier }) !== true) return failure("invalid_request", "a supplied bundle did not authenticate");
+export async function answerProofRequest(request: ProofRequest, options: AnswerOptions): Promise<ProofResult> {
+  if (options.authenticate !== null && typeof options.authenticate !== "function") {
+    throw new TypeError("answerProofRequest needs an explicit authenticate function or null");
+  }
+  const supplied = request.bundles ?? [], selected = options.bundles ?? [];
+  // The caller's inputs are checked on their own first, so a fault is attributed to whoever
+  // supplied it: a malformed supplied bundle is the caller's `invalid_request`, while a fault in
+  // the provider's own selection is rethrown for the provider to report.
+  for (const bundle of supplied) {
+    let supplier;
+    try { supplier = decodeSpaceFacts(bundle.payload).supplier; } catch { return failure("invalid_request", "a supplied bundle is malformed"); }
+    if (options.authenticate && options.authenticate({ ...bundle, supplier }) !== true) {
+      return failure("invalid_request", "a supplied bundle did not authenticate");
     }
   }
+  try { suppliedProgram(supplied); } catch (error) {
+    if (error instanceof ProofLimit) return failure("limit_exceeded", "the supplied evidence exceeds the clause limit");
+    return failure("invalid_request", "a supplied clause is malformed");
+  }
   const budget = request.budget ?? {}, ceilings = options.ceilings ?? {};
+  // Both deadlines count from receipt; what was already spent is not available to search.
+  const deadline = lowest(budget.deadlineMs, ceilings.deadlineMs);
+  const remaining = deadline === undefined ? undefined : deadline - (options.elapsedMs ?? 0);
+  if (remaining !== undefined && remaining <= 0) return failure("not_completed", "the deadline passed before search");
   const limits = {
     ...RunLimits.default(),
-    wallClockMs: lowest(budget.deadlineMs, ceilings.deadlineMs),
+    wallClockMs: remaining,
     searchNodes: lowest(budget.searchNodes, ceilings.searchNodes),
     memoryBytes: lowest(budget.memoryBytes, ceilings.memoryBytes),
   };
+  let proof: Uint8Array;
   try {
-    const proof = await prove({
-      root: request.root, query: request.query, bundles: [...supplied, ...(options.bundles ?? [])],
+    proof = await prove({
+      root: request.root, query: request.query, bundles: [...supplied, ...selected],
       limits, memoryLimitPages: options.memoryLimitPages,
     }, options.signal);
-    return { kind: "proof", proof, observations: options.observations ?? [] };
   } catch (error) {
     if (error instanceof ProofSearchError) return failure(error.reason);
-    if (error instanceof ProofLimit) return failure("limit_exceeded", error.message);
-    // The supplied program's structural checks: bad placement, body shape or clause encoding.
-    if (error instanceof TypeError) return failure("invalid_request", error.message);
-    throw error;
+    if (error instanceof ProofLimit) return failure("limit_exceeded", "the supplied and selected evidence exceeds the clause limit");
+    throw error; // A fault in the provider's selection or the engine is the provider's to report.
   }
+  if (options.revalidate && await options.revalidate() !== true) {
+    return failure("evidence_changed", "the selected evidence or its disclosure changed during search");
+  }
+  // Observations describe the selection, so they accompany only a proof that carries selected bytes.
+  const selectedBytes = new Set(selected.map(bundle => Buffer.from(bundle.payload).toString("hex")));
+  const usesSelection = decodeProof(proof).bundles.some(bundle => selectedBytes.has(Buffer.from(bundle.payload).toString("hex")));
+  return { kind: "proof", proof, observations: usesSelection ? options.observations ?? [] : [] };
 }
 
 /** The local twin of a remote provider: the same interface, with Logos in this process. */
-export function createLocalProofProvider(options: Omit<AnswerOptions, "signal"> = {}): ProofProvider {
+export function createLocalProofProvider(options: Omit<AnswerOptions, "signal">): ProofProvider {
   return Object.freeze({
     async produce(request: ProofRequest, signal?: AbortSignal): Promise<ProducedProof> {
+      signal?.throwIfAborted();
       const result = await answerProofRequest(request, signal ? { ...options, signal } : options);
+      // Caller cancellation rejects with the caller's own reason, as the HTTP provider does.
+      signal?.throwIfAborted();
       if (result.kind === "failure") throw new ProofProviderError(result.code, result.detail);
       return { proof: result.proof, observations: result.observations };
     },

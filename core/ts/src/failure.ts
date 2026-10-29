@@ -11,12 +11,13 @@ export type ProofSearchFailure = "exhausted" | "not_completed";
  * describe the request, the evidence, the provider or its response. None means "prohibited".
  */
 export type ProofProviderFailure = ProofSearchFailure
-  | "disclosure_refused" | "unauthenticated" | "evidence_unavailable" | "invalid_request"
-  | "limit_exceeded" | "provider_unavailable" | "invalid_response";
+  | "disclosure_refused" | "unauthenticated" | "evidence_unavailable" | "evidence_changed"
+  | "invalid_request" | "limit_exceeded" | "provider_refused" | "provider_unavailable" | "invalid_response";
 
 export const proofProviderFailures: readonly ProofProviderFailure[] = Object.freeze([
   "exhausted", "not_completed", "disclosure_refused", "unauthenticated", "evidence_unavailable",
-  "invalid_request", "limit_exceeded", "provider_unavailable", "invalid_response",
+  "evidence_changed", "invalid_request", "limit_exceeded", "provider_refused", "provider_unavailable",
+  "invalid_response",
 ]);
 
 /** The failure a proof provider reports. `detail` is safe descriptive text, never evidence. */

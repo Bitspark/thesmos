@@ -70,7 +70,7 @@ const entryFiles = new Map(Object.keys(entries).map(key => [resolve(exportFile(k
 // The same package rules hold for each entry's declarations: a consumer type-checks what it installs.
 const graphs = [...Object.entries(entries).map(([key, rule]) => [key, rule, resolve(exportFile(key))]),
   ...Object.entries(entries).map(([key, rule]) => [`${key} (types)`,
-    { forbidden: rule.forbidden.filter(name => name.startsWith("@")), noEntries: false },
+    rule,
     resolve(join(installed, manifest.exports[key].types))])];
 for (const [key, rule, start] of graphs) {
   const seen = new Set(), bare = new Set(), reached = new Set();
@@ -79,6 +79,8 @@ for (const [key, rule, start] of graphs) {
     seen.add(file);
     if (file !== start && entryFiles.has(file)) reached.add(entryFiles.get(file));
     const source = readFileSync(file, "utf8");
+    const references = [...source.matchAll(/\/\/\/\s*<reference\s+types=["']([^"']+)["']/g)].map(match => match[1]);
+    for (const name of references) bare.add(name.split("/").slice(0, name.startsWith("@") ? 2 : 1).join("/"));
     for (const [, specifier] of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g)) {
       if (specifier.startsWith(".")) {
         visit(resolve(dirname(file), file.endsWith(".d.ts") ? specifier.replace(/\.js$/, ".d.ts") : specifier));

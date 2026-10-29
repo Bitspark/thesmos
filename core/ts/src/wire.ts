@@ -9,7 +9,11 @@ import type { Query, SpaceFactsBundle } from "./types.js";
 
 // Kernel-free and filesystem-free: this module only encodes, decodes and binds proof requests.
 
-/** Provider-neutral hints. A provider may lower them, never raise them above its own ceilings. */
+/**
+ * Provider-neutral hints. `deadlineMs` is a duration in milliseconds that the provider counts from
+ * receiving the request, queue time included. A provider may lower any hint and never raises one
+ * above its own ceilings; a lower requested value is never increased.
+ */
 export interface ProofBudget {
   readonly deadlineMs?: number;
   readonly memoryBytes?: number;
@@ -29,7 +33,10 @@ export interface ProofRequest {
   readonly budget?: ProofBudget;
 }
 
-/** Which source and position a provider read. Descriptive only: not currency or acceptance. */
+/**
+ * Which source and position the provider read for the evidence it selected. Descriptive only: no
+ * claim of currency, atomicity or acceptance, and nothing about bundles the caller supplied.
+ */
 export interface SourceObservation {
   readonly source: Value;
   readonly position: Value;
@@ -50,16 +57,20 @@ export interface ProofProvider {
 }
 
 export const proofMediaType = "application/vnd.bitspark.spaces-proof+ontos";
-export const defaultMaxRequestBytes = 8 * 1024 * 1024;
+// Matches the first provider's native request reader; raise both sides together, never one alone.
+export const defaultMaxRequestBytes = 1024 * 1024;
 export const defaultMaxResponseBytes = 2 * 1024 * 1024;
 
 const symbol = (name: string) => new Atom(new TextEncoder().encode(name));
 const requestTag = symbol("spaces/proof-request/1"), resultTag = symbol("spaces/proof-result/1");
 const proofTag = symbol("proof"), failureTag = symbol("failure"), envelopeTag = symbol(protocol.format);
 const optional = (value: Value | undefined) => new Tuple(value === undefined ? [] : [value]);
+// Deadlines stay within what timers and the engine's clock conversion represent exactly.
+export const maxDeadlineMs = 2_147_483_647;
 const integer = (value: number | undefined, name: string) => {
   if (value === undefined) return undefined;
   if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`${name} must be a non-negative safe integer`);
+  if (name === "deadlineMs" && value > maxDeadlineMs) throw new TypeError(`deadlineMs must not exceed ${maxDeadlineMs}`);
   return encodeInt(BigInt(value));
 };
 
@@ -82,6 +93,11 @@ function readCount(value: Value | undefined): number | undefined {
   const count = readInt(present);
   if (count < 0n || count > BigInt(Number.MAX_SAFE_INTEGER)) throw new TypeError("Budget value out of range");
   return Number(count);
+}
+function readDeadline(value: Value | undefined): number | undefined {
+  const deadline = readCount(value);
+  if (deadline !== undefined && deadline > maxDeadlineMs) throw new TypeError("Deadline out of range");
+  return deadline;
 }
 function decodeBounded(input: Uint8Array, maxBytes: number): Value {
   if (!(input instanceof Uint8Array)) throw new TypeError("Expected Ontos-encoded bytes");
@@ -124,7 +140,7 @@ export function decodeProofRequest(input: Uint8Array, maxBytes = defaultMaxReque
     }),
     selection: readOptional(selection),
     disclosureProofs: tuple(disclosure).items().map(bytes),
-    budget: present({ deadlineMs: readCount(deadlineMs), memoryBytes: readCount(memoryBytes), searchNodes: readCount(searchNodes) }),
+    budget: present({ deadlineMs: readDeadline(deadlineMs), memoryBytes: readCount(memoryBytes), searchNodes: readCount(searchNodes) }),
   });
 }
 
@@ -182,7 +198,8 @@ export function proofConcludes(proof: Uint8Array, expected: { readonly root: Val
     const conclusion = derivation.nodes[derivation.root]?.conclusion;
     if (!conclusion?.equals(GroundLiteral.of("authorized", [actor, statement, space]))) return false;
     const anchor = GroundLiteral.of("root", [expected.root]);
-    return derivation.nodes.every(node => node.kind !== "leaf" || node.conclusion.equals(anchor));
+    const leaves = derivation.nodes.filter(node => node.kind === "leaf");
+    return leaves.length > 0 && leaves.every(node => node.conclusion.equals(anchor));
   } catch {
     return false;
   }

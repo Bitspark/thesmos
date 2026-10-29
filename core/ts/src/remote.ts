@@ -8,12 +8,17 @@ export { ProofProviderError, proofProviderFailures } from "./failure.js";
 export type { ProofProviderFailure, ProofSearchFailure } from "./failure.js";
 export {
   decodeProofRequest, decodeProofResult, defaultMaxRequestBytes, defaultMaxResponseBytes,
-  encodeProofRequest, encodeProofResult, proofConcludes, proofMediaType,
+  encodeProofRequest, encodeProofResult, proofMediaType,
 } from "./wire.js";
 export type { ProducedProof, ProofBudget, ProofProvider, ProofRequest, ProofResult, SourceObservation } from "./wire.js";
 
-/** What the caller's authentication hook sees: the exact request it may sign or annotate. */
+/**
+ * What the caller's authentication hook sees: the exact request it signs or annotates. A signature
+ * should bind the method, the exact target, the `content-type` header and the body. The adapter
+ * never retries, so every `produce` authenticates afresh, with a new replay nonce where one is used.
+ */
 export interface OutgoingProofRequest {
+  readonly method: "POST";
   readonly url: URL;
   readonly body: Uint8Array;
   readonly headers: Headers;
@@ -29,14 +34,23 @@ export interface HttpProofProviderOptions {
   readonly maxResponseBytes?: number;
 }
 
-/** HTTP statuses for responses that carry no proof result. */
+/**
+ * HTTP statuses for responses that carry no typed proof result. These claim no more than the
+ * status: an untyped 403 is a refusal by the provider or an intermediary, not an authentication
+ * failure and not a disclosure decision.
+ */
 function statusFailure(status: number): ProofProviderFailure {
-  if (status === 401 || status === 403) return "unauthenticated";
+  if (status === 401) return "unauthenticated";
+  if (status === 403) return "provider_refused";
   if (status === 413) return "limit_exceeded";
   if (status === 400 || status === 422) return "invalid_request";
   if (status === 429 || status >= 500) return "provider_unavailable";
   return "invalid_response";
 }
+
+const maxDetail = 512;
+const safeDetail = (detail: string | undefined) =>
+  detail === undefined ? undefined : detail.length > maxDetail ? detail.slice(0, maxDetail) + "…" : detail;
 
 async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length") ?? NaN);
@@ -48,7 +62,12 @@ async function readBounded(response: Response, maxBytes: number): Promise<Uint8A
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
-    const next = reader ? await reader.read() : { done: true as const, value: undefined };
+    let next;
+    try {
+      next = reader ? await reader.read() : { done: true as const, value: undefined };
+    } catch (error) {
+      throw new ProofProviderError("provider_unavailable", "the response was interrupted", { cause: error });
+    }
     if (next.done) break;
     total += next.value.byteLength;
     if (total > maxBytes) {
@@ -68,7 +87,7 @@ async function readBounded(response: Response, maxBytes: number): Promise<Uint8A
  * proof is untrusted until the receiver verifies it with its own root and actual request query.
  */
 export function createHttpProofProvider(options: HttpProofProviderOptions): ProofProvider {
-  const url = new URL(options.endpoint);
+  const endpoint = new URL(options.endpoint);
   const transport = options.fetch ?? globalThis.fetch;
   if (typeof transport !== "function") throw new TypeError("A fetch implementation is required");
   const maxRequestBytes = options.maxRequestBytes ?? defaultMaxRequestBytes;
@@ -80,14 +99,16 @@ export function createHttpProofProvider(options: HttpProofProviderOptions): Proo
       if (body.byteLength > maxRequestBytes) {
         throw new ProofProviderError("limit_exceeded", `request of ${body.byteLength} bytes exceeds ${maxRequestBytes}`);
       }
+      // A fresh target per call: an authentication hook may annotate it without affecting others.
+      const url = new URL(endpoint);
       const headers = new Headers({ "content-type": proofMediaType, accept: proofMediaType });
-      await options.authenticate?.({ url, body, headers });
+      await options.authenticate?.({ method: "POST", url, body, headers });
       let response: Response;
       try {
         response = await transport(url, { method: "POST", headers, body: body as BodyInit, redirect: "error", signal });
       } catch (error) {
         if (signal?.aborted) throw signal.reason;
-        throw new ProofProviderError("provider_unavailable", "the provider could not be reached", { cause: error });
+        throw new ProofProviderError("provider_unavailable", "the provider could not be reached, or redirected the request", { cause: error });
       }
       const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
       if (type !== proofMediaType) {
@@ -102,7 +123,7 @@ export function createHttpProofProvider(options: HttpProofProviderOptions): Proo
         if (error instanceof ProofProviderError) throw error;
         throw new ProofProviderError("invalid_response", "the provider returned a malformed proof result", { cause: error });
       }
-      if (result.kind === "failure") throw new ProofProviderError(result.code, result.detail);
+      if (result.kind === "failure") throw new ProofProviderError(result.code, safeDetail(result.detail));
       if (!proofConcludes(result.proof, request)) {
         throw new ProofProviderError("invalid_response", "the proof does not conclude the requested query from the requested root");
       }
