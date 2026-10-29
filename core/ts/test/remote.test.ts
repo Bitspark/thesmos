@@ -260,6 +260,27 @@ test("a selection that changes during search is not released", async () => {
   } finally { await server.close(); }
 });
 
+test("observations computed after revalidation report the final read", async () => {
+  let revalidated = false;
+  const server = await serve(url => async (call, request) => {
+    if (call.audience !== url) return { kind: "failure", code: "unauthenticated" };
+    return answerProofRequest(request, {
+      authenticate: authenticateArchon, bundles: [teamRecords],
+      revalidate: () => { revalidated = true; return true; },
+      observations: () => {
+        assert.equal(revalidated, true);
+        return [{ source: atom("records"), position: encodeInt(42n) }];
+      },
+    });
+  });
+  try {
+    const produced = await createHttpProofProvider({ endpoint: server.url, ...as("bob") })
+      .produce({ root: docsRoot, query: renameQuery, bundles: [publicBundle] });
+    assert.equal(produced.observations.length, 1);
+    assert.equal(produced.observations[0]!.position.equals(encodeInt(42n)), true);
+  } finally { await server.close(); }
+});
+
 test("a second vocabulary and a separately configured provider use the same contract", async () => {
   const server = await serve(referenceProvider({ root: deviceRoot }));
   try {
@@ -383,6 +404,10 @@ test("request and response bounds and caller cancellation are enforced", async (
     const pending = client.produce(request, controller.signal);
     setTimeout(() => controller.abort(), 50);
     await assert.rejects(pending, { name: "AbortError" });
+    // The adapter's own wait bound is a provider failure, distinct from the caller's cancellation.
+    await assert.rejects(createHttpProofProvider({ endpoint: server.url, ...as("bob"), timeoutMs: 100 }).produce(request),
+      failsWith("provider_unavailable"));
+    assert.throws(() => createHttpProofProvider({ endpoint: server.url, timeoutMs: 0 }), TypeError);
   } finally {
     release();
     await server.close();

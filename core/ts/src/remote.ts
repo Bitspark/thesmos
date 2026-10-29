@@ -7,7 +7,7 @@ import {
 export { ProofProviderError, proofProviderFailures } from "./failure.js";
 export type { ProofProviderFailure, ProofSearchFailure } from "./failure.js";
 export {
-  decodeProofRequest, decodeProofResult, defaultMaxRequestBytes, defaultMaxResponseBytes,
+  decodeProofRequest, decodeProofResult, defaultMaxRequestBytes, defaultMaxResponseBytes, maxDeadlineMs,
   encodeProofRequest, encodeProofResult, proofMediaType,
 } from "./wire.js";
 export type { ProducedProof, ProofBudget, ProofProvider, ProofRequest, ProofResult, SourceObservation } from "./wire.js";
@@ -32,7 +32,14 @@ export interface HttpProofProviderOptions {
   readonly authenticate?: (request: OutgoingProofRequest) => void | Promise<void>;
   readonly maxRequestBytes?: number;
   readonly maxResponseBytes?: number;
+  /**
+   * The longest the adapter waits for a complete response, in milliseconds (default 60,000). On
+   * expiry it stops waiting with `provider_unavailable`; the provider still owns its worker.
+   */
+  readonly timeoutMs?: number;
 }
+
+export const defaultTimeoutMs = 60_000;
 
 /**
  * HTTP statuses for responses that carry no typed proof result. These claim no more than the
@@ -92,6 +99,8 @@ export function createHttpProofProvider(options: HttpProofProviderOptions): Proo
   if (typeof transport !== "function") throw new TypeError("A fetch implementation is required");
   const maxRequestBytes = options.maxRequestBytes ?? defaultMaxRequestBytes;
   const maxResponseBytes = options.maxResponseBytes ?? defaultMaxResponseBytes;
+  const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError("timeoutMs must be a positive integer");
   return Object.freeze({
     async produce(request: ProofRequest, signal?: AbortSignal): Promise<ProducedProof> {
       signal?.throwIfAborted();
@@ -103,11 +112,20 @@ export function createHttpProofProvider(options: HttpProofProviderOptions): Proo
       const url = new URL(endpoint);
       const headers = new Headers({ "content-type": proofMediaType, accept: proofMediaType });
       await options.authenticate?.({ method: "POST", url, body, headers });
+      // The caller's cancellation and the adapter's own wait bound, kept distinguishable.
+      const timer = AbortSignal.timeout(timeoutMs);
+      const wait = signal ? AbortSignal.any([signal, timer]) : timer;
+      const stopped = (error: unknown) => {
+        if (signal?.aborted) return signal.reason;
+        if (timer.aborted) return new ProofProviderError("provider_unavailable", `no complete response within ${timeoutMs} ms`, { cause: error });
+        return undefined;
+      };
       let response: Response;
       try {
-        response = await transport(url, { method: "POST", headers, body: body as BodyInit, redirect: "error", signal });
+        response = await transport(url, { method: "POST", headers, body: body as BodyInit, redirect: "error", signal: wait });
       } catch (error) {
-        if (signal?.aborted) throw signal.reason;
+        const reason = stopped(error);
+        if (reason !== undefined) throw reason;
         throw new ProofProviderError("provider_unavailable", "the provider could not be reached, or redirected the request", { cause: error });
       }
       const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
@@ -119,7 +137,8 @@ export function createHttpProofProvider(options: HttpProofProviderOptions): Proo
       try {
         result = decodeProofResult(await readBounded(response, maxResponseBytes), maxResponseBytes);
       } catch (error) {
-        if (signal?.aborted) throw signal.reason;
+        const reason = stopped(error);
+        if (reason !== undefined) throw reason;
         if (error instanceof ProofProviderError) throw error;
         throw new ProofProviderError("invalid_response", "the provider returned a malformed proof result", { cause: error });
       }

@@ -101,8 +101,11 @@ export interface AnswerOptions {
    * still authenticate every bundle a proof carries.
    */
   readonly authenticate: AuthenticateSpaceFacts | null;
-  /** Descriptive positions of the provider-selected evidence, returned with a proof. */
-  readonly observations?: readonly SourceObservation[];
+  /**
+   * Descriptive positions of the provider-selected evidence, returned with a proof. A function is
+   * called after `revalidate`, so final reads (such as a recheck time) can be reported.
+   */
+  readonly observations?: readonly SourceObservation[] | (() => readonly SourceObservation[] | Promise<readonly SourceObservation[]>);
   /** The provider's ceilings. A request's budget may lower them, never raise them. */
   readonly ceilings?: ProofBudget;
   /** Time already spent on this request since receipt, such as queueing, deducted from its deadline. */
@@ -173,7 +176,9 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
   // Observations describe the selection, so they accompany only a proof that carries selected bytes.
   const selectedBytes = new Set(selected.map(bundle => Buffer.from(bundle.payload).toString("hex")));
   const usesSelection = decodeProof(proof).bundles.some(bundle => selectedBytes.has(Buffer.from(bundle.payload).toString("hex")));
-  return { kind: "proof", proof, observations: usesSelection ? options.observations ?? [] : [] };
+  if (!usesSelection) return { kind: "proof", proof, observations: [] };
+  const observations = typeof options.observations === "function" ? await options.observations() : options.observations ?? [];
+  return { kind: "proof", proof, observations };
 }
 
 /** The local twin of a remote provider: the same interface, with Logos in this process. */

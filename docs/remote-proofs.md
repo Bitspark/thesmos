@@ -35,7 +35,7 @@ the provider. This contract is a source preview; names and codes may change with
 | `query` | `{ actor, space, statement }`. |
 | `bundles` | Signed bundles supplied by the caller, exact bytes. A request with only these must work; it computes over the supplied inputs and asserts nothing about their currency. |
 | `selection` | An opaque, provider-defined reference to records the provider selects, for example a bounded set of exact placements. |
-| `disclosureProofs` | Native proofs the caller presents for the provider's own disclosure checks, for example `authorized(caller, read_records, placement)` for each selected placement. Each proof is associated by the conclusion it establishes. |
+| `disclosureProofs` | Native proofs the caller presents for the provider's own disclosure checks, for example `authorized(caller, read_records, placement)` for each selected placement. A provider profile may instead carry each proof inside its own `selection` value and require this field to be empty; one association, never two. |
 | `budget` | Hints: `deadlineMs`, `memoryBytes`, `searchNodes`. `deadlineMs` is a duration counted by the provider from receiving the request, queue time included. A provider may lower any hint, never raises one above its ceilings and never increases a lower requested value. |
 
 A result is either the existing `spaces/proof/6` envelope, carrying only the bundles its
@@ -70,7 +70,10 @@ provider's native request reader; raise the limit only together with the provide
 authentication, ingress and decoder. Responses are bounded at 2 MiB. Decoding is bounded in
 depth, atom size and arity.
 
-The adapter refuses redirects and never retries. Its `authenticate` hook receives the exact
+The adapter refuses redirects and never retries, and bounds its own wait with `timeoutMs`
+(default 60,000 ms): on expiry it stops waiting with `provider_unavailable`, distinct from the
+caller's own cancellation, while the provider still owns its worker. A caller that requests a
+longer `deadlineMs` sets a correspondingly longer `timeoutMs`. Its `authenticate` hook receives the exact
 method, target, headers (with `content-type` already set) and body; a signature should bind all
 of them. Each `produce` call authenticates afresh, so a caller's retry carries a new replay nonce.
 
@@ -105,9 +108,9 @@ performs its own disclosure checks under its own root and selects its records. I
 const result = await answerProofRequest(request, {
   authenticate: authenticateArchon,     // required: a function, or null to skip explicitly
   bundles: selectedBundles,             // the provider's current selection, added to supplied bundles
-  observations,                         // positions of the selected evidence only
+  observations: () => finalPositions(), // selected evidence only; a function runs after revalidate
   ceilings: { deadlineMs, searchNodes, memoryBytes },
-  elapsedMs: queuedForMs,               // deducted from the request's deadline
+  elapsedMs: sinceHandlerEntryMs,       // everything since receipt: body, authentication, selection, queue
   revalidate: () => selectionStillHolds(), // checked before releasing selected proof material
   signal,                               // cooperative cancellation of the search
 });
@@ -124,6 +127,18 @@ returns false after the search, the result is `evidence_changed` and no proof is
 Aborting the client's wait or the helper's `signal` is cooperative; enforcing worker deadlines,
 memory limits, termination and cleanup is the provider's responsibility. The helper makes no
 authority decision.
+
+## Provider profiles
+
+The SDK fixes the request, result, failure and wire shapes; each provider fixes a profile inside
+them: its endpoint and audience, its `selection` value and how disclosure proofs are associated
+with it, its observation values, its budget ceilings and its body bounds. thesmos interprets none
+of these. The first profile, Accounts', carries exact `(space, disclosureProof)` pairs inside a
+tagged selection value, requires `disclosureProofs` to be empty, reports one observation for its
+record selection and one for its control source, and returns `evidence_changed` when either
+changes during a search. A consumer configures the adapter's `maxRequestBytes` and `timeoutMs` for
+the provider it calls; the 1 MiB default stays until a provider's whole request path supports
+more.
 
 ## Migrating from local production
 
