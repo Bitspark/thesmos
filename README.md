@@ -17,8 +17,9 @@ This source preview is not a public npm release. Other dependencies are public.
 
 The [v1.0.0-preview.5 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.5)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
-of preview.4 (the optional `/remote` entry for remote proof production and the
-provider-side helpers in `/client`), it embeds the frozen law at build time, so
+of preview.4 (the optional `/remote` entry for remote proof production, the
+provider-side helpers in `/client` and declarations that type-check under
+NodeNext), it embeds the frozen law at build time, so
 the root, `/identity` and `/remote` read no files at runtime, and qualifies the
 optional Archon adapter with Archon 0.16.0. Its other dependencies are unchanged
 from preview.4. Its complete gate passed 113 tests and preserved all eight frozen
