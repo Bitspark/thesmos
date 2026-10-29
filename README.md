@@ -15,13 +15,13 @@ available:** the required `@bitspark/logos-contract@0.24.0` and optional client
 dependency `@bitspark/logos-kernel@0.24.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
-The [v1.0.0-preview.3 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.3)
+The [v1.0.0-preview.4 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.4)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
-of preview.2, which added the optional `/identity` entry, it adds proof pruning,
-the `memoryLimitPages` option and the entry-isolation gate. It requires Logos
-0.24.0 (preview.2 used 0.23.0), so consumers moving to it also move their Logos
-packages. Its complete gate passed 100 tests and preserved all eight frozen
-artifacts. Consumers need the stated Logos access; release
+of preview.3 (proof pruning, the `memoryLimitPages` option on Logos 0.24.0 and
+the entry-isolation gate), it adds the optional `/remote` entry for remote proof
+production, the provider-side helpers in `/client`, and declarations that
+type-check under NodeNext. Its dependencies are unchanged from preview.3. Its
+complete gate passed 112 tests and preserved all eight frozen artifacts. Consumers need the stated Logos access; release
 archives bundle no private dependency code. The `/client` and `/archon` entries
 still require their optional peers at the versions below.
 
@@ -87,6 +87,11 @@ Measured envelope (`core/ts/test/shapes.test.ts`, on a development workstation):
 
 These are far inside the verifier's limits (2048 nodes, depth 256, 1 MiB). A nested rule that leaves the inner request's actor unbound (`authorized(W, Inner, S)` with `W` free) did not complete in a one-off observation: after about 36 s Logos returned `not_completed` (not pinned by a test). Bind the actor through the inner request's own terms.
 
+A caller without Logos can instead ask a configured provider through
+`@bitspark/thesmos/remote` (`createHttpProofProvider(...).produce(request)`), and
+verify the returned proof locally exactly as above; see
+[remote proof production](docs/remote-proofs.md).
+
 The receiver imports no search engine. The client requires Logos kernel, and
 the Archon adapter requires `@bitspark/archon@0.15.0`; both are optional peers.
 Custom authentication can implement the small callback instead. The adapter
@@ -114,12 +119,13 @@ receiver can acquire applicable bundles without adding policy to the law.
 | Location | Responsibility |
 | --- | --- |
 | [law/](law/common-law.logos) | Frozen common law and compiled Ontos data; separate asserter template |
-| [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter; `/identity` issuer/subject profile |
+| [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter; `/identity` issuer/subject profile; `/remote` proof-provider contract and HTTP adapter |
 | [conformance/](conformance/frozen.json) | Frozen artifact pins; original corpus is `law/conformance.ontos` |
 | [core/ts/test/](core/ts/test/sdk.test.ts) | Core, asserter, mutation and client tests |
 | [docs/model.md](docs/model.md) | Model, trusted facts and implementation boundaries |
 | [docs/foundations.md](docs/foundations.md) | How the public Constellation contracts are used |
 | [docs/runtime.md](docs/runtime.md) | Decision record for the shared runtime: placement, result contract, admitted profile |
+| [docs/remote-proofs.md](docs/remote-proofs.md) | Remote proof production: contract, wire, failures and migration from local `prove` |
 
 There is no store, server, global lease, expiry default, role registry, separate
 publication permission or execution engine in the SDK. A timestamp is signed

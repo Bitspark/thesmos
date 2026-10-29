@@ -2,9 +2,10 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { Atom, ClauseId, programDigest, programFromValue } from "@bitspark/logos-contract";
 import { decode } from "@bitspark/ontos-codec";
-import protocol from "@bitspark/thesmos/law/protocol.json" with { type: "json" };
+import protocolData from "@bitspark/thesmos/law/protocol.json" with { type: "json" };
 
-export { protocol };
+// A plain constant, so the emitted declarations carry the shape and import no JSON module.
+export const protocol = protocolData;
 const require = createRequire(import.meta.url);
 const bytes = readFileSync(require.resolve("@bitspark/thesmos/law/common-law.ontos"));
 const templateBytes = readFileSync(require.resolve("@bitspark/thesmos/law/assertion-template.ontos"));
