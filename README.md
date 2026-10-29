@@ -15,13 +15,13 @@ available:** the required `@bitspark/logos-contract@0.24.0` and optional client
 dependency `@bitspark/logos-kernel@0.24.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
-The [v1.0.0-preview.3 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.3)
+The [v1.0.0-preview.4 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.4)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
-of preview.2, which added the optional `/identity` entry, it adds proof pruning,
-the `memoryLimitPages` option and the entry-isolation gate. It requires Logos
-0.24.0 (preview.2 used 0.23.0), so consumers moving to it also move their Logos
-packages. Its complete gate passed 100 tests and preserved all eight frozen
-artifacts. Consumers need the stated Logos access; release
+of preview.3 (proof pruning, the `memoryLimitPages` option on Logos 0.24.0 and
+the entry-isolation gate), it adds the optional `/remote` entry for remote proof
+production, the provider-side helpers in `/client`, and declarations that
+type-check under NodeNext. Its dependencies are unchanged from preview.3. Its
+complete gate passed 112 tests and preserved all eight frozen artifacts. Consumers need the stated Logos access; release
 archives bundle no private dependency code. The `/client` and `/archon` entries
 still require their optional peers at the versions below.
 

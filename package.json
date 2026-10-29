@@ -1,6 +1,6 @@
 {
   "name": "@bitspark/thesmos",
-  "version": "1.0.0-preview.3",
+  "version": "1.0.0-preview.4",
   "description": "The Spaces authority law, with local Logos proof verification and an optional proof client.",
   "license": "Apache-2.0",
   "type": "module",
