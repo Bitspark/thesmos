@@ -17,13 +17,15 @@ This source preview is not a public npm release. Other dependencies are public.
 
 The [v1.0.0-preview.5 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.5)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
-of preview.3 (proof pruning, the `memoryLimitPages` option on Logos 0.24.0 and
-the entry-isolation gate), it adds the optional `/remote` entry for remote proof
-production, the provider-side helpers in `/client`, and declarations that
-type-check under NodeNext. Its dependencies are unchanged from preview.3. Its
-complete gate passed 112 tests and preserved all eight frozen artifacts. Consumers need the stated Logos access; release
-archives bundle no private dependency code. The `/client` and `/archon` entries
-still require their optional peers at the versions below.
+of preview.4 (the optional `/remote` entry for remote proof production, the
+provider-side helpers in `/client` and declarations that type-check under
+NodeNext), it embeds the frozen law at build time, so
+the root, `/identity` and `/remote` read no files at runtime, and qualifies the
+optional Archon adapter with Archon 0.16.0. Its other dependencies are unchanged
+from preview.4. Its complete gate passed 113 tests and preserved all eight frozen
+artifacts. Consumers need the stated Logos access; release archives bundle no
+private dependency code. The `/client` and `/archon` entries still require their
+optional peers at the versions below.
 
 With existing GitHub Packages read access, install the committed lockfile and
 run the complete gate:
