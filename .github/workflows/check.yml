@@ -38,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -52,6 +54,8 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -61,6 +65,15 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGE_READ_TOKEN }}
       - run: npm run check
+      - name: Export deterministic proof-capacity inputs
+        run: node dist/scripts/export-proof-capacity.js "$RUNNER_TEMP/proof-capacity-inputs" "$QUALIFIED_REVISION"
+        env:
+          QUALIFIED_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thesmos-proof-capacity-inputs-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/proof-capacity-inputs/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: thesmos-package

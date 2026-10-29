@@ -129,6 +129,17 @@ receiver can acquire applicable bundles without adding policy to the law.
 
 ## Layout and boundaries
 
+The complete remote SDK workflow also exports deterministic 4/24/32/64/128-hop
+inputs for [the retained capacity case](https://github.com/Bitspark/thesmos/issues/28).
+Its `thesmos-proof-capacity-inputs-<revision>` artifact binds every file to the
+checked source and a SHA-256 digest. The files contain the existing clause-codec
+values for rules, facts and goal, plus the complete remote proof request. Facts
+and the goal use zero-body clauses as containers for their head terms. All
+synthetic timestamps are fixed; these are structural reproductions of the
+original fixture, not its historical captured bytes. Exporting inputs performs
+no search and establishes no native capacity result. The fixture sizes are
+measurement cases, not delegation limits.
+
 | Location | Responsibility |
 | --- | --- |
 | [law/](law/common-law.logos) | Frozen common law and compiled Ontos data; separate asserter template. Embedded into the library at build time, so the root, `/identity` and `/remote` read no files at runtime |
