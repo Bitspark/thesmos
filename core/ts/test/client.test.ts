@@ -6,11 +6,13 @@ import { loadSearcher, RunLimits } from "@bitspark/logos-kernel";
 import { encodeInt } from "@bitspark/ontos-data";
 import {
   atom, authorization, attributedClause, createSpacesVerifier, decodeProof,
-  decodeSpaceFacts, encodeProof, encodeSpaceFacts, fact, path,
+  decodeSpaceFacts, encodeProof, encodeSpaceFacts, fact, path, type Value,
 } from "../src/index.js";
 import { prove, ProofSearchError, type ProofSearchFailure } from "../src/client.js";
 import { authenticateArchon, signSpaceFacts } from "../src/archon.js";
-import { bob, documentBundles, root, runDocumentExample, space, statement } from "../../../examples/document-service.js";
+import {
+  bob, docsAsserter, documentBundles, root, runDocumentExample, space, statement, team, teamAsserter,
+} from "../../../examples/document-service.js";
 
 const failsAs = (reason: ProofSearchFailure) => (error: unknown) =>
   error instanceof ProofSearchError && error.reason === reason && error.name === "ProofSearchError"
@@ -103,6 +105,27 @@ test("valid signatures cannot bootstrap a self-appointed supplier", async () => 
     attributedClause(outsider, space, authorization(bob, statement, space)),
   ] }, seed)];
   await assert.rejects(prove({ root, query, bundles }), failsAs("exhausted"));
+});
+
+test("supply_facts at a space reaches its whole subtree, and only that subtree", async () => {
+  // The supplier chooses each clause's author, so a root-attributed grant counts at its own space.
+  const delegation = documentBundles().slice(0, 2), verifier = createSpacesVerifier({ root, authenticate: authenticateArchon });
+  const rootGrant = (at: Value, supplier = docsAsserter, seed = 3) => signSpaceFacts({ supplier, space: at,
+    assertedAt: encodeInt(0n), clauses: [attributedClause(root, at, authorization(bob, statement, at))] },
+    new Uint8Array(32).fill(seed));
+  const query = { actor: bob, statement, space };
+  for (const target of [space, path("team", "docs", "draft")]) {
+    const proof = await prove({ root, query: { ...query, space: target }, bundles: [...delegation, rootGrant(space)] });
+    assert.equal(verifier.verify({ query: { ...query, space: target }, proof }).permitted, true);
+  }
+  // Outside the supplier's subtree, the same attribution does not count.
+  for (const outside of [team, path("team", "other")]) {
+    await assert.rejects(prove({ root, query: { ...query, space: outside }, bundles: [...delegation, rootGrant(outside)] }),
+      failsAs("exhausted"));
+  }
+  // The parent's own supplier can: only the supplier's reach differs.
+  const parent = await prove({ root, query: { ...query, space: team }, bundles: [...delegation, rootGrant(team, teamAsserter, 2)] });
+  assert.equal(verifier.verify({ query: { ...query, space: team }, proof: parent }).permitted, true);
 });
 
 test("the search memory ceiling and budget reach Logos", async () => {
