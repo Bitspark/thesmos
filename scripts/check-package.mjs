@@ -48,7 +48,8 @@ process.stdout.write(execFileSync(process.execPath, [join(directory, "check.mjs"
 // the entries that must not carry them: a receiver importing the root installs no search engine.
 const installed = join(directory, "node_modules", "@bitspark", "thesmos");
 const network = ["http", "https", "http2", "net", "tls", "dns", "dgram"].flatMap(name => [name, "node:" + name]);
-const filesystem = ["fs", "node:fs", "fs/promises", "node:fs/promises", "module", "node:module"];
+const filesystem = ["fs", "node:fs", "fs/promises", "node:fs/promises", "module", "node:module",
+  "law data self-import", "process.getBuiltinModule", "import.meta.url"];
 const entries = {
   // The receiver and its helpers embed the frozen law: no search, signing, network or files.
   ".": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network, ...filesystem], noEntries: true },
@@ -83,6 +84,8 @@ for (const [key, rule, start] of graphs) {
     if (file !== start && entryFiles.has(file)) reached.add(entryFiles.get(file));
     const source = readFileSync(file, "utf8");
     const references = [...source.matchAll(/\/\/\/\s*<reference\s+types=["']([^"']+)["']/g)].map(match => match[1]);
+    if (/\bgetBuiltinModule\s*\(/.test(source)) bare.add("process.getBuiltinModule");
+    if (/\bimport\.meta\.url\b/.test(source)) bare.add("import.meta.url");
     for (const name of references) bare.add(name.split("/").slice(0, name.startsWith("@") ? 2 : 1).join("/"));
     for (const [, specifier] of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g)) {
       if (specifier.startsWith(".")) {
@@ -91,7 +94,8 @@ for (const [key, rule, start] of graphs) {
       else if (specifier === "@bitspark/thesmos" || specifier.startsWith("@bitspark/thesmos/")) {
         // A self-import resolves through the exports map; law data (./law/*) holds no code.
         const target = manifest.exports["." + specifier.slice("@bitspark/thesmos".length)];
-        if (target) visit(resolve(installed, file.endsWith(".d.ts") ? target.types : target.default));
+        if (typeof target === "object") visit(resolve(installed, file.endsWith(".d.ts") ? target.types : target.default));
+        else bare.add("law data self-import"); // e.g. @bitspark/thesmos/law/*: data read at runtime
       } else bare.add(specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/"));
     }
   };

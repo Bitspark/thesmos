@@ -25,7 +25,8 @@ reaches its provider only through the caller's `fetch`; `/archon` imports no sea
 or network module; and `/client` imports no network module. A consumer with no
 Logos kernel or Archon installed must type-check and use `/remote`.
 
-The library reads no files at runtime. `npm run build` first runs
+The root, `/identity` and `/remote` read no files at runtime (`/client`'s Logos
+kernel still loads its WASM binary). `npm run build` first runs
 `scripts/embed-law.mjs`, which generates `core/ts/src/law.generated.ts` from
 `law/*.ontos` and `law/protocol.json`; that file is never edited or committed.
 The `law/` files stay the only source, compiled from `.logos` by

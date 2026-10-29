@@ -10,7 +10,7 @@ writeFileSync(new URL("../core/ts/src/law.generated.ts", import.meta.url), [
   "// Generated at build time by scripts/embed-law.mjs from law/*.ontos and law/protocol.json.",
   "// Do not edit or commit; the law/ files are the source, pinned by conformance/frozen.json.",
   "",
-  "const bytes = (text: string) => Uint8Array.from(atob(text), char => char.charCodeAt(0));",
+  "const bytes = (text: string): Uint8Array => Uint8Array.from(atob(text), char => char.charCodeAt(0));",
   "",
   `export const commonLawBytes = bytes(${base64(law("common-law.ontos"))});`,
   `export const assertionTemplateBytes = bytes(${base64(law("assertion-template.ontos"))});`,

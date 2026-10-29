@@ -1,7 +1,7 @@
 import { Atom, ClauseId, programDigest, programFromValue } from "@bitspark/logos-contract";
 import { decode } from "@bitspark/ontos-codec";
-// The frozen law is embedded at build time (see scripts/compile-law.ts), so loading the library
-// reads no files: the verifier and every entry run in Node, browsers and edge runtimes alike.
+// The frozen law is embedded at build time by scripts/embed-law.mjs (run by `npm run build`), so
+// the root, /identity and /remote read no files and run in Node, browsers and edge runtimes alike.
 import {
   assertionTemplateBytes as templateBytes, commonLawBytes as bytes, protocol,
   spaceAsserterTemplateBytes as layerBytes,
