@@ -73,7 +73,7 @@ depth, atom size and arity.
 The adapter refuses redirects and never retries, and bounds its own wait with `timeoutMs`
 (default 60,000 ms): on expiry it stops waiting with `provider_unavailable`, distinct from the
 caller's own cancellation, while the provider still owns its worker. A caller that requests a
-longer `deadlineMs` sets a correspondingly longer `timeoutMs`. Its `authenticate` hook receives the exact
+longer `deadlineMs` sets a correspondingly longer `timeoutMs`; both are at most 2,147,483,647 ms. Its `authenticate` hook receives the exact
 method, target, headers (with `content-type` already set) and body; a signature should bind all
 of them. Each `produce` call authenticates afresh, so a caller's retry carries a new replay nonce.
 
@@ -126,7 +126,10 @@ the caller's input and is never reported as part of the provider's selection. Wh
 uses selected evidence, `revalidate` runs before release: `false` gives `evidence_changed` and
 `"evidence_unavailable"` (the re-read failed) gives that code; neither releases a proof. A proof
 over the protocol's byte limit is `limit_exceeded`. `elapsedMs` must be finite and non-negative;
-fractional monotonic readings are rounded down to whole milliseconds for the search budget.
+the remaining budget is floored to whole milliseconds, which counts a fractional elapsed
+reading up, never granting time already spent. Budget hints and provider ceilings must be
+whole, non-negative numbers: a caller's malformed hint is `invalid_request`, a provider's is
+thrown.
 Aborting the client's wait or the helper's `signal` is cooperative; enforcing worker deadlines,
 memory limits, termination and cleanup is the provider's responsibility. The helper makes no
 authority decision.

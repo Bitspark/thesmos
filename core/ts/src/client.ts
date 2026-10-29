@@ -9,7 +9,9 @@ import { authorization, fact, inputLiteral } from "./encoding.js";
 import { ProofProviderError, type ProofProviderFailure, type ProofSearchFailure } from "./failure.js";
 import { suppliedProgram } from "./program.js";
 import { decodeProof, encodeProof, ProofLimit } from "./proof.js";
+import { protocol } from "./data.js";
 import type { AuthenticateSpaceFacts, Query, SpaceFactsBundle } from "./types.js";
+import { maxDeadlineMs } from "./wire.js";
 import type {
   ProducedProof, ProofBudget, ProofProvider, ProofRequest, ProofResult, SourceObservation,
 } from "./wire.js";
@@ -131,20 +133,32 @@ const failure = (code: ProofProviderFailure, detail?: string): ProofResult =>
   detail === undefined ? { kind: "failure", code } : { kind: "failure", code, detail };
 const lowest = (a: number | undefined, b: number | undefined) =>
   a === undefined ? b : b === undefined ? a : Math.min(a, b);
+/** Whether every set hint is a whole, non-negative number the engine can take. */
+const wholeHints = (hints: ProofBudget) =>
+  [hints.deadlineMs, hints.memoryBytes, hints.searchNodes].every(value =>
+    value === undefined || (Number.isSafeInteger(value) && value >= 0)) &&
+  (hints.deadlineMs === undefined || hints.deadlineMs <= maxDeadlineMs);
 
 /**
  * Answer one proof request with the existing producer. A provider calls this after its own caller
  * authentication, disclosure checks and record selection; it adds no authority decision.
  */
 export async function answerProofRequest(request: ProofRequest, options: AnswerOptions): Promise<ProofResult> {
+  // Provider configuration is checked first: its faults are the provider's, whatever the caller sent.
   if (options.authenticate !== null && typeof options.authenticate !== "function") {
     throw new TypeError("answerProofRequest needs an explicit authenticate function or null");
   }
+  if (options.elapsedMs !== undefined && (typeof options.elapsedMs !== "number" || !Number.isFinite(options.elapsedMs) || options.elapsedMs < 0)) {
+    throw new TypeError("elapsedMs must be a finite, non-negative number");
+  }
+  if (options.ceilings && !wholeHints(options.ceilings)) throw new TypeError("ceilings must be whole, non-negative numbers");
+  if (request.budget && !wholeHints(request.budget)) return failure("invalid_request", "budget hints must be whole, non-negative numbers");
   const supplied = request.bundles ?? [], selected = options.bundles ?? [];
   // The caller's inputs are checked on their own first, so a fault is attributed to whoever
   // supplied it: a malformed supplied bundle is the caller's `invalid_request`, while a fault in
   // the provider's own selection is rethrown for the provider to report.
   for (const bundle of supplied) {
+    if (bundle.payload.byteLength > protocol.limits.maxProofBytes) return failure("limit_exceeded", "a supplied bundle exceeds the bundle size limit");
     let supplier;
     try { supplier = decodeSpaceFacts(bundle.payload).supplier; } catch { return failure("invalid_request", "a supplied bundle is malformed"); }
     if (options.authenticate && options.authenticate({ ...bundle, supplier }) !== true) {
@@ -157,11 +171,11 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
     throw error;
   }
   const elapsed = options.elapsedMs ?? 0;
-  if (!Number.isFinite(elapsed) || elapsed < 0) throw new TypeError("elapsedMs must be a finite, non-negative number");
   const budget = request.budget ?? {}, ceilings = options.ceilings ?? {};
   // Both deadlines count from receipt; what was already spent is not available to search.
   const deadline = lowest(budget.deadlineMs, ceilings.deadlineMs);
-  // Logos takes whole milliseconds; a fractional monotonic reading rounds down, never up.
+  // Logos takes whole milliseconds. Flooring the remaining budget counts a fractional elapsed
+  // reading up to the next millisecond: conservative, never granting time that was spent.
   const remaining = deadline === undefined ? undefined : Math.floor(deadline - elapsed);
   if (remaining !== undefined && remaining <= 0) return failure("not_completed", "the deadline passed before search");
   const limits = {
@@ -184,7 +198,7 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
   // The receiver's verifier rejects any proof over the protocol's byte limit; say so here instead.
   let carried;
   try { carried = decodeProof(proof).bundles; } catch (error) {
-    if (error instanceof ProofLimit) return failure("limit_exceeded", "the proof exceeds the proof size limit");
+    if (error instanceof ProofLimit) return failure("limit_exceeded", "the proof exceeds the protocol's proof limits");
     throw error;
   }
   // Observations and revalidation concern the selection, so only a proof carrying selected bytes needs them.
@@ -205,10 +219,12 @@ export function createLocalProofProvider(options: Omit<AnswerOptions, "signal" |
   if (options.authenticate !== null && typeof options.authenticate !== "function") {
     throw new TypeError("createLocalProofProvider needs an explicit authenticate function or null");
   }
+  // Per-request values never come from construction, even when passed through an untyped object.
+  const { signal: _signal, elapsedMs: _elapsed, ...fixed } = options as AnswerOptions;
   return Object.freeze({
     async produce(request: ProofRequest, signal?: AbortSignal): Promise<ProducedProof> {
       signal?.throwIfAborted();
-      const result = await answerProofRequest(request, signal ? { ...options, signal } : options);
+      const result = await answerProofRequest(request, signal ? { ...fixed, signal } : fixed);
       // Caller cancellation rejects with the caller's own reason, as the HTTP provider does.
       signal?.throwIfAborted();
       if (result.kind === "failure") throw new ProofProviderError(result.code, result.detail);

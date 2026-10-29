@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { getPublicKey } from "@bitspark/archon";
+import { loadSearcher } from "@bitspark/logos-kernel";
 import { Atom, Tuple, type Value } from "@bitspark/logos-contract";
 import { encode } from "@bitspark/ontos-codec";
 import { encodeInt, encodeText } from "@bitspark/ontos-data";
@@ -335,6 +336,7 @@ test("tampered evidence, mismatched proofs and untyped responses keep their dist
     if (mode === "503") return { raw: { status: 503, type: "text/plain", body: new TextEncoder().encode("busy") } };
     if (mode === "401") return { raw: { status: 401, type: "text/plain", body: new Uint8Array() } };
     if (mode === "403") return { raw: { status: 403, type: "text/html", body: new TextEncoder().encode("denied") } };
+    if (mode === "long-detail") return { kind: "failure", code: "evidence_unavailable", detail: "\u{1F600}".repeat(600) };
     if (mode === "chunked") return { raw: { status: 200, type: proofMediaType, body: new Uint8Array(4096), chunked: true } };
     return referenceProvider({ root: docsRoot })(url)(call, request);
   });
@@ -366,6 +368,15 @@ test("tampered evidence, mismatched proofs and untyped responses keep their dist
     // An untyped 403 is a refusal, not evidence of an authentication failure or a disclosure decision.
     mode = "403";
     await assert.rejects(client.produce(readBob), failsWith("provider_refused"));
+    mode = "long-detail";
+    await assert.rejects(client.produce(readBob), (error: unknown) => {
+      if (!(error instanceof ProofProviderError) || error.code !== "evidence_unavailable") return false;
+      const points = Array.from(error.detail!);
+      assert.equal(points.length, 513);
+      assert.equal(points[511], "\u{1F600}");
+      encodeProofResult({ kind: "failure", code: error.code, detail: error.detail! });
+      return true;
+    });
     mode = "chunked";
     await assert.rejects(createHttpProofProvider({ endpoint: server.url, ...as("bob"), maxResponseBytes: 64 }).produce(readBob),
       failsWith("limit_exceeded"));
@@ -389,11 +400,20 @@ test("search outcomes, provider ceilings and deadlines stay distinct from refusa
     // A deadline counts from receipt: time already spent leaves less, or none, for search.
     const timed = (elapsedMs: number, deadlineMs: number) => answerProofRequest({ root: docsRoot, query: renameQuery,
       bundles: [publicBundle], budget: { deadlineMs } }, { authenticate: authenticateArchon, bundles: [teamRecords], elapsedMs });
-    assert.equal((await timed(1000, 500)).kind, "failure");
     assert.deepEqual(await timed(1000, 500), { kind: "failure", code: "not_completed", detail: "the deadline passed before search" });
-    assert.equal((await timed(12.345678, 60_000)).kind, "proof");
+    assert.equal((await timed(1 / 3, 60_000)).kind, "proof");
+    assert.equal((await timed(12.3456789, 60_000)).kind, "proof");
     await assert.rejects(timed(Number.NaN, 60_000), TypeError);
     await assert.rejects(timed(-5, 60_000), TypeError);
+    await assert.rejects(answerProofRequest({ root: docsRoot, query: renameQuery, bundles: [publicBundle] },
+      { authenticate: authenticateArchon, ceilings: { searchNodes: 1000.5 } }), TypeError);
+    assert.deepEqual(await answerProofRequest({ root: docsRoot, query: renameQuery, bundles: [publicBundle],
+      budget: { memoryBytes: 1.5 } }, { authenticate: authenticateArchon }),
+      { kind: "failure", code: "invalid_request", detail: "budget hints must be whole, non-negative numbers" });
+    // Per-request values never come from construction, even through an untyped options object.
+    const loose = { bundles: [teamRecords], authenticate: authenticateArchon, elapsedMs: 1000 } as Parameters<typeof createLocalProofProvider>[0];
+    assert.equal(docsVerifier.verify({ query: renameQuery, proof: (await createLocalProofProvider(loose)
+      .produce({ root: docsRoot, query: renameQuery, bundles: [publicBundle], budget: { deadlineMs: 500 } })).proof }).permitted, true);
     await assert.rejects(answerProofRequest({ root: docsRoot, query: renameQuery },
       { authenticate: null, bundles: [{ payload: new Uint8Array([1, 2, 3]), authentication: atom("x") }] }),
       (error: unknown) => error instanceof Error && !(error instanceof ProofProviderError));
@@ -402,6 +422,20 @@ test("search outcomes, provider ceilings and deadlines stay distinct from refusa
     await assert.rejects(answerProofRequest({ root: docsRoot, query: renameQuery },
       {} as unknown as Parameters<typeof answerProofRequest>[1]), TypeError);
   } finally { await server.close(); }
+});
+
+test("caller faults in supplied evidence keep their own codes", async () => {
+  const oversized = signSpaceFacts({ supplier: docsRoot, space: path(), assertedAt: encodeText("x".repeat(1_100_000)),
+    clauses: [attributedClause(docsRoot, path(), authorization(bob, readRecords, team))] }, seed(51));
+  assert.deepEqual(await answerProofRequest({ root: docsRoot, query: readQuery(bob), bundles: [oversized] },
+    { authenticate: authenticateArchon }),
+    { kind: "failure", code: "limit_exceeded", detail: "a supplied bundle exceeds the bundle size limit" });
+  const [badRule] = (await loadSearcher()).parseProgram("authorized(P, x, []) :- foo(P).").clauses;
+  const badClause = signSpaceFacts({ supplier: docsRoot, space: path(), assertedAt: time,
+    clauses: [attributedClause(docsRoot, path(), badRule!)] }, seed(51));
+  assert.deepEqual(await answerProofRequest({ root: docsRoot, query: readQuery(bob), bundles: [badClause] },
+    { authenticate: authenticateArchon }),
+    { kind: "failure", code: "invalid_request", detail: "a supplied clause is malformed" });
 });
 
 test("a proof over the protocol's size limit is limit_exceeded, not a thrown error", async () => {
@@ -413,7 +447,7 @@ test("a proof over the protocol's size limit is limit_exceeded, not a thrown err
       attributedClause(docsRoot, team, authorization(bob, rename, team))] }, seed(52)),
   ];
   assert.deepEqual(await answerProofRequest({ root: docsRoot, query: renameQuery, bundles }, { authenticate: authenticateArchon }),
-    { kind: "failure", code: "limit_exceeded", detail: "the proof exceeds the proof size limit" });
+    { kind: "failure", code: "limit_exceeded", detail: "the proof exceeds the protocol's proof limits" });
 });
 
 test("request and response bounds and caller cancellation are enforced", async () => {
@@ -447,6 +481,7 @@ test("request and response bounds and caller cancellation are enforced", async (
       failsWith("provider_unavailable"));
     assert.throws(() => createHttpProofProvider({ endpoint: server.url, timeoutMs: 0 }), TypeError);
     assert.throws(() => createHttpProofProvider({ endpoint: server.url, maxRequestBytes: Number.NaN }), TypeError);
+    assert.throws(() => createHttpProofProvider({ endpoint: server.url, timeoutMs: 2 ** 31 }), TypeError);
   } finally {
     release();
     await server.close();

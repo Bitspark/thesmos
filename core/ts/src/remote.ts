@@ -1,4 +1,5 @@
 import { ProofProviderError, type ProofProviderFailure } from "./failure.js";
+import { maxDeadlineMs } from "./wire.js";
 import {
   decodeProofResult, defaultMaxRequestBytes, defaultMaxResponseBytes, encodeProofRequest,
   proofConcludes, proofMediaType, type ProducedProof, type ProofProvider, type ProofRequest,
@@ -66,7 +67,7 @@ const safeDetail = (detail: string | undefined) => {
 async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length") ?? NaN);
   if (declared > maxBytes) {
-    await response.body?.cancel();
+    await response.body?.cancel().catch(() => undefined);
     throw new ProofProviderError("limit_exceeded", `response of ${declared} bytes exceeds ${maxBytes}`);
   }
   const reader = response.body?.getReader();
@@ -82,7 +83,7 @@ async function readBounded(response: Response, maxBytes: number): Promise<Uint8A
     if (next.done) break;
     total += next.value.byteLength;
     if (total > maxBytes) {
-      await reader!.cancel();
+      await reader!.cancel().catch(() => undefined);
       throw new ProofProviderError("limit_exceeded", `response exceeds ${maxBytes} bytes`);
     }
     chunks.push(next.value);
@@ -107,6 +108,8 @@ export function createHttpProofProvider(options: HttpProofProviderOptions): Proo
   for (const [name, value] of [["maxRequestBytes", maxRequestBytes], ["maxResponseBytes", maxResponseBytes], ["timeoutMs", timeoutMs]] as const) {
     if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive integer`);
   }
+  // Timers hold at most 2^31-1 ms; larger values would silently fire at once.
+  if (timeoutMs > maxDeadlineMs) throw new TypeError(`timeoutMs must not exceed ${maxDeadlineMs}`);
   return Object.freeze({
     async produce(request: ProofRequest, signal?: AbortSignal): Promise<ProducedProof> {
       signal?.throwIfAborted();
