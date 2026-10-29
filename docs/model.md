@@ -41,18 +41,20 @@ acceptance, sequencing and retrieval mechanisms are outside this model.
 Because the supplier chooses each clause's author, `supply_facts` at a space
 is authority over that whole subtree. A supplier of `P` can supply a clause at
 `P` attributed to the root: the author guard then holds by rule 1, so a grant
-in that clause confers any right at `P` or below. The reach stops there. A
-clause must sit at its bundle's exact space, the guard checks `supply_facts` at
-that placement, and rule 4 confers only within a grant's placement. Grant
+in that clause confers any right at `P` or below. Its grants reach no further:
+a clause must sit at its bundle's exact space, the guard checks `supply_facts`
+at that placement, and rule 4 confers only within a grant's placement. Grant
 `supply_facts` only to someone trusted to say anything in that subtree. A
 mirror, cache or host that only relays bundles needs none, because each bundle
 carries its own supplier's authentication.
 
 The same trust reaches rule conditions. A body premise `counts(A, P, H)` holds
-for any clause a supplier of `P` attributes to `A`, provided `A` is authorized
-for `H`. A rule conditioned on `counts(observer, [team], eligible(Person))`
-therefore relies on what the suppliers of `[team]` say `observer` asserted,
-not only on `observer`. This is how a supplier's influence leaves its subtree:
+for any clause a supplier of `P` attributes to `A`. Its author guard,
+`authorized(A, H, P)`, does not limit that supplier, which can supply the
+grant itself, attributed to the root. A rule conditioned on `counts(observer,
+[team], eligible(Person))` therefore relies on what the suppliers of `[team]`
+say `observer` asserted, not only on `observer`. This is how a supplier's
+influence leaves its subtree:
 a rule placed elsewhere that reads facts counted at `P` fires on a fact
 misattributed at `P`, within the authority of that rule's own author.
 Requiring each author's signature would not remove this trust, since the

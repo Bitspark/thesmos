@@ -39,8 +39,8 @@ while signing the output with its own service key. Under the Archon adapter,
 that supplier is a public-key atom. The account author remains the issuer/subject
 Value; the supplier is trusted for attribution. The existing law still checks
 the author for each instantiated conclusion and the supplier for `supply_facts`,
-but the author check does not constrain the supplier: it could equally
-attribute a clause to any author holding that right, including the root. A rule
+but the author check does not constrain the supplier: it can attribute a clause
+to the root, or supply the grant that authorizes its chosen author. A rule
 conditioned on an account's records therefore also relies on the suppliers of
 that space; see [the space-asserter layer](model.md#the-separate-space-asserter-layer).
 
