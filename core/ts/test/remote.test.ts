@@ -179,6 +179,10 @@ test("proof request and result codecs round-trip and refuse malformed input", ()
   const unknownCode = encode(new Tuple([atom("spaces/proof-result/1"), new Tuple([atom("failure"), atom("permitted"), new Tuple([])])]));
   assert.throws(() => decodeProofResult(unknownCode), TypeError);
   assert.throws(() => encodeProofRequest({ ...request, budget: { deadlineMs: 2 ** 31 } }), TypeError);
+  const overDeadline = encode(new Tuple([atom("spaces/proof-request/1"), docsRoot,
+    new Tuple([bob, team, rename]), new Tuple([]), new Tuple([]), new Tuple([]),
+    new Tuple([new Tuple([encodeInt(2n ** 31n)]), new Tuple([]), new Tuple([])])]));
+  assert.throws(() => decodeProofRequest(overDeadline), TypeError);
 });
 
 test("two-stage disclosure works remotely, with no local search, and matches local production", async () => {
@@ -258,6 +262,20 @@ test("a selection that changes during search is not released", async () => {
     await assert.rejects(client.produce({ root: docsRoot, query: renameQuery, bundles: [publicBundle],
       selection: placements(team), disclosureProofs: [read.proof] }), failsWith("evidence_changed"));
   } finally { await server.close(); }
+});
+
+test("revalidation distinguishes an unavailable re-read and is skipped when the selection is unused", async () => {
+  let calls = 0;
+  const answer = (query: { actor: Value; statement: Value; space: Value }) => answerProofRequest({ root: docsRoot, query, bundles: [publicBundle] }, {
+    authenticate: authenticateArchon, bundles: [teamRecords],
+    revalidate: () => { calls++; return "evidence_unavailable"; },
+  });
+  assert.deepEqual(await answer(renameQuery), { kind: "failure", code: "evidence_unavailable",
+    detail: "the selected evidence could not be re-read" });
+  assert.equal(calls, 1);
+  const unused = await answer(readQuery(bob));
+  assert.equal(unused.kind, "proof");
+  assert.equal(calls, 1);
 });
 
 test("observations computed after revalidation report the final read", async () => {
@@ -364,19 +382,38 @@ test("search outcomes, provider ceilings and deadlines stay distinct from refusa
     await assert.rejects(client.produce({ ...target, budget: { searchNodes: 1 } }), failsWith("not_completed"));
     await assert.rejects(client.produce({ ...target, query: { ...renameQuery, actor: carol } }), failsWith("exhausted"));
     // A provider ceiling holds even when the request asks for more.
-    const local = (options: { ceilings?: { searchNodes?: number; deadlineMs?: number }; elapsedMs?: number }) =>
+    const local = (options: { ceilings?: { searchNodes?: number; deadlineMs?: number } }) =>
       createLocalProofProvider({ bundles: [teamRecords], authenticate: authenticateArchon, ...options });
     await assert.rejects(local({ ceilings: { searchNodes: 1 } }).produce({ root: docsRoot, query: renameQuery,
       bundles: [publicBundle], budget: { searchNodes: 1_000_000 } }), failsWith("not_completed"));
-    // A deadline counts from receipt: time already spent queueing leaves none for search.
-    await assert.rejects(local({ elapsedMs: 1000 }).produce({ root: docsRoot, query: renameQuery,
-      bundles: [publicBundle], budget: { deadlineMs: 500 } }), failsWith("not_completed"));
+    // A deadline counts from receipt: time already spent leaves less, or none, for search.
+    const timed = (elapsedMs: number, deadlineMs: number) => answerProofRequest({ root: docsRoot, query: renameQuery,
+      bundles: [publicBundle], budget: { deadlineMs } }, { authenticate: authenticateArchon, bundles: [teamRecords], elapsedMs });
+    assert.equal((await timed(1000, 500)).kind, "failure");
+    assert.deepEqual(await timed(1000, 500), { kind: "failure", code: "not_completed", detail: "the deadline passed before search" });
+    assert.equal((await timed(12.345678, 60_000)).kind, "proof");
+    await assert.rejects(timed(Number.NaN, 60_000), TypeError);
+    await assert.rejects(timed(-5, 60_000), TypeError);
     await assert.rejects(answerProofRequest({ root: docsRoot, query: renameQuery },
-      { authenticate: null, bundles: [{ payload: new Uint8Array([1, 2, 3]), authentication: atom("x") }] }));
+      { authenticate: null, bundles: [{ payload: new Uint8Array([1, 2, 3]), authentication: atom("x") }] }),
+      (error: unknown) => error instanceof Error && !(error instanceof ProofProviderError));
+    assert.throws(() => createLocalProofProvider({} as unknown as Parameters<typeof createLocalProofProvider>[0]), TypeError);
     // The provider helper refuses to run without an explicit authentication choice.
     await assert.rejects(answerProofRequest({ root: docsRoot, query: renameQuery },
       {} as unknown as Parameters<typeof answerProofRequest>[1]), TypeError);
   } finally { await server.close(); }
+});
+
+test("a proof over the protocol's size limit is limit_exceeded, not a thrown error", async () => {
+  const padded = encodeText("x".repeat(600_000));
+  const bundles = [
+    signSpaceFacts({ supplier: docsRoot, space: path(), assertedAt: padded, clauses: [
+      attributedClause(docsRoot, path(), authorization(teamAsserter, atom("supply_facts"), team))] }, seed(51)),
+    signSpaceFacts({ supplier: teamAsserter, space: team, assertedAt: padded, clauses: [
+      attributedClause(docsRoot, team, authorization(bob, rename, team))] }, seed(52)),
+  ];
+  assert.deepEqual(await answerProofRequest({ root: docsRoot, query: renameQuery, bundles }, { authenticate: authenticateArchon }),
+    { kind: "failure", code: "limit_exceeded", detail: "the proof exceeds the proof size limit" });
 });
 
 test("request and response bounds and caller cancellation are enforced", async () => {
@@ -396,18 +433,20 @@ test("request and response bounds and caller cancellation are enforced", async (
     await assert.rejects(createHttpProofProvider({ endpoint: server.url, ...as("bob"), maxResponseBytes: 64 }).produce(request),
       failsWith("limit_exceeded"));
     const client = createHttpProofProvider({ endpoint: server.url, ...as("bob") });
-    await assert.rejects(client.produce(request, AbortSignal.abort()), { name: "AbortError" });
-    await assert.rejects(createLocalProofProvider({ authenticate: authenticateArchon }).produce(request, AbortSignal.abort()),
-      { name: "AbortError" });
+    const reason = new Error("the caller stopped");
+    await assert.rejects(client.produce(request, AbortSignal.abort(reason)), (error: unknown) => error === reason);
+    await assert.rejects(createLocalProofProvider({ authenticate: authenticateArchon }).produce(request, AbortSignal.abort(reason)),
+      (error: unknown) => error === reason);
     slow = true;
     const controller = new AbortController();
     const pending = client.produce(request, controller.signal);
-    setTimeout(() => controller.abort(), 50);
-    await assert.rejects(pending, { name: "AbortError" });
+    setTimeout(() => controller.abort(reason), 50);
+    await assert.rejects(pending, (error: unknown) => error === reason);
     // The adapter's own wait bound is a provider failure, distinct from the caller's cancellation.
     await assert.rejects(createHttpProofProvider({ endpoint: server.url, ...as("bob"), timeoutMs: 100 }).produce(request),
       failsWith("provider_unavailable"));
     assert.throws(() => createHttpProofProvider({ endpoint: server.url, timeoutMs: 0 }), TypeError);
+    assert.throws(() => createHttpProofProvider({ endpoint: server.url, maxRequestBytes: Number.NaN }), TypeError);
   } finally {
     release();
     await server.close();

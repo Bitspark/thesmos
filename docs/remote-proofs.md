@@ -122,8 +122,11 @@ const result = await answerProofRequest(request, {
 with fixed, safe detail; a fault in the provider's own selected evidence or in the engine is
 thrown for the provider to report, never blamed on the caller. Observations are returned only
 when the proof carries at least one of the provider's selected bundles. A supplied copy of a bundle the provider no longer selects remains
-the caller's input and is never reported as part of the provider's selection. When `revalidate`
-returns false after the search, the result is `evidence_changed` and no proof is released.
+the caller's input and is never reported as part of the provider's selection. When the proof
+uses selected evidence, `revalidate` runs before release: `false` gives `evidence_changed` and
+`"evidence_unavailable"` (the re-read failed) gives that code; neither releases a proof. A proof
+over the protocol's byte limit is `limit_exceeded`. `elapsedMs` must be finite and non-negative;
+fractional monotonic readings are rounded down to whole milliseconds for the search budget.
 Aborting the client's wait or the helper's `signal` is cooperative; enforcing worker deadlines,
 memory limits, termination and cleanup is the provider's responsibility. The helper makes no
 authority decision.
@@ -143,7 +146,7 @@ more.
 ## Migrating from local production
 
 `createLocalProofProvider` implements the same `ProofProvider` interface with Logos in the
-current process. Code written against `ProofProvider` changes only how the provider is built:
+current process; it takes the helper's options except the per-request `signal` and `elapsedMs`. Code written against `ProofProvider` changes only how the provider is built:
 
 ```ts
 // Before: local search in the consumer.

@@ -2,6 +2,7 @@ import {
   canonicalClauseId, ClauseId, Derivation, LeafNode, RuleNode, type Value,
 } from "@bitspark/logos-contract";
 import { embedQuery, RunLimits, type EmbedRequest, type KernelOutcome } from "@bitspark/logos-kernel";
+import { DecodeError } from "@bitspark/ontos-codec";
 import { decodeSpaceFacts } from "./bundles.js";
 import { lawDigest, layerDigest } from "./data.js";
 import { authorization, fact, inputLiteral } from "./encoding.js";
@@ -108,17 +109,23 @@ export interface AnswerOptions {
   readonly observations?: readonly SourceObservation[] | (() => readonly SourceObservation[] | Promise<readonly SourceObservation[]>);
   /** The provider's ceilings. A request's budget may lower them, never raise them. */
   readonly ceilings?: ProofBudget;
-  /** Time already spent on this request since receipt, such as queueing, deducted from its deadline. */
+  /**
+   * Milliseconds already spent on this request since the provider received it (body, authentication,
+   * selection, queue), deducted from its deadline. Finite and non-negative; fractions are fine.
+   */
   readonly elapsedMs?: number;
   /**
-   * Called after a successful search, before the proof is released. Returning false, for example
-   * because the selection or the caller's disclosure authority changed, yields `evidence_changed`.
+   * Called after a successful search that used provider-selected evidence, before the proof is
+   * released. `true` releases it; `false` (the selection or the caller's disclosure authority changed)
+   * yields `evidence_changed`; `"evidence_unavailable"` (the re-read itself failed) yields that code.
    */
-  readonly revalidate?: () => boolean | Promise<boolean>;
+  readonly revalidate?: () => Revalidation | Promise<Revalidation>;
   readonly memoryLimitPages?: EmbedRequest["memoryLimitPages"];
   /** Cooperative cancellation of the search. Terminating a worker remains the provider's own job. */
   readonly signal?: AbortSignal;
 }
+
+export type Revalidation = boolean | "evidence_unavailable";
 
 const failure = (code: ProofProviderFailure, detail?: string): ProofResult =>
   detail === undefined ? { kind: "failure", code } : { kind: "failure", code, detail };
@@ -146,12 +153,16 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
   }
   try { suppliedProgram(supplied); } catch (error) {
     if (error instanceof ProofLimit) return failure("limit_exceeded", "the supplied evidence exceeds the clause limit");
-    return failure("invalid_request", "a supplied clause is malformed");
+    if (error instanceof TypeError || error instanceof DecodeError) return failure("invalid_request", "a supplied clause is malformed");
+    throw error;
   }
+  const elapsed = options.elapsedMs ?? 0;
+  if (!Number.isFinite(elapsed) || elapsed < 0) throw new TypeError("elapsedMs must be a finite, non-negative number");
   const budget = request.budget ?? {}, ceilings = options.ceilings ?? {};
   // Both deadlines count from receipt; what was already spent is not available to search.
   const deadline = lowest(budget.deadlineMs, ceilings.deadlineMs);
-  const remaining = deadline === undefined ? undefined : deadline - (options.elapsedMs ?? 0);
+  // Logos takes whole milliseconds; a fractional monotonic reading rounds down, never up.
+  const remaining = deadline === undefined ? undefined : Math.floor(deadline - elapsed);
   if (remaining !== undefined && remaining <= 0) return failure("not_completed", "the deadline passed before search");
   const limits = {
     ...RunLimits.default(),
@@ -170,19 +181,30 @@ export async function answerProofRequest(request: ProofRequest, options: AnswerO
     if (error instanceof ProofLimit) return failure("limit_exceeded", "the supplied and selected evidence exceeds the clause limit");
     throw error; // A fault in the provider's selection or the engine is the provider's to report.
   }
-  if (options.revalidate && await options.revalidate() !== true) {
-    return failure("evidence_changed", "the selected evidence or its disclosure changed during search");
+  // The receiver's verifier rejects any proof over the protocol's byte limit; say so here instead.
+  let carried;
+  try { carried = decodeProof(proof).bundles; } catch (error) {
+    if (error instanceof ProofLimit) return failure("limit_exceeded", "the proof exceeds the proof size limit");
+    throw error;
   }
-  // Observations describe the selection, so they accompany only a proof that carries selected bytes.
+  // Observations and revalidation concern the selection, so only a proof carrying selected bytes needs them.
   const selectedBytes = new Set(selected.map(bundle => Buffer.from(bundle.payload).toString("hex")));
-  const usesSelection = decodeProof(proof).bundles.some(bundle => selectedBytes.has(Buffer.from(bundle.payload).toString("hex")));
+  const usesSelection = carried.some(bundle => selectedBytes.has(Buffer.from(bundle.payload).toString("hex")));
   if (!usesSelection) return { kind: "proof", proof, observations: [] };
+  if (options.revalidate) {
+    const still = await options.revalidate();
+    if (still === "evidence_unavailable") return failure("evidence_unavailable", "the selected evidence could not be re-read");
+    if (still !== true) return failure("evidence_changed", "the selected evidence or its disclosure changed during search");
+  }
   const observations = typeof options.observations === "function" ? await options.observations() : options.observations ?? [];
   return { kind: "proof", proof, observations };
 }
 
 /** The local twin of a remote provider: the same interface, with Logos in this process. */
-export function createLocalProofProvider(options: Omit<AnswerOptions, "signal">): ProofProvider {
+export function createLocalProofProvider(options: Omit<AnswerOptions, "signal" | "elapsedMs">): ProofProvider {
+  if (options.authenticate !== null && typeof options.authenticate !== "function") {
+    throw new TypeError("createLocalProofProvider needs an explicit authenticate function or null");
+  }
   return Object.freeze({
     async produce(request: ProofRequest, signal?: AbortSignal): Promise<ProducedProof> {
       signal?.throwIfAborted();

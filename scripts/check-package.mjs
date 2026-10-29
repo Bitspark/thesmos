@@ -66,7 +66,9 @@ for (const [key, target] of Object.entries(manifest.exports)) {
   }
 }
 const exportFile = key => join(installed, manifest.exports[key].default);
-const entryFiles = new Map(Object.keys(entries).map(key => [resolve(exportFile(key)), key]));
+// Both an entry's code and its declarations identify it, so either graph can detect reaching another entry.
+const entryFiles = new Map(Object.keys(entries).flatMap(key => [
+  [resolve(exportFile(key)), key], [resolve(join(installed, manifest.exports[key].types)), key]]));
 // The same package rules hold for each entry's declarations: a consumer type-checks what it installs.
 const graphs = [...Object.entries(entries).map(([key, rule]) => [key, rule, resolve(exportFile(key))]),
   ...Object.entries(entries).map(([key, rule]) => [`${key} (types)`,

@@ -56,8 +56,12 @@ function statusFailure(status: number): ProofProviderFailure {
 }
 
 const maxDetail = 512;
-const safeDetail = (detail: string | undefined) =>
-  detail === undefined ? undefined : detail.length > maxDetail ? detail.slice(0, maxDetail) + "…" : detail;
+// Truncates by code point, so the result never splits a surrogate pair and re-encodes as text.
+const safeDetail = (detail: string | undefined) => {
+  if (detail === undefined) return undefined;
+  const points = Array.from(detail);
+  return points.length > maxDetail ? points.slice(0, maxDetail).join("") + "…" : detail;
+};
 
 async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length") ?? NaN);
@@ -100,7 +104,9 @@ export function createHttpProofProvider(options: HttpProofProviderOptions): Proo
   const maxRequestBytes = options.maxRequestBytes ?? defaultMaxRequestBytes;
   const maxResponseBytes = options.maxResponseBytes ?? defaultMaxResponseBytes;
   const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError("timeoutMs must be a positive integer");
+  for (const [name, value] of [["maxRequestBytes", maxRequestBytes], ["maxResponseBytes", maxResponseBytes], ["timeoutMs", timeoutMs]] as const) {
+    if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive integer`);
+  }
   return Object.freeze({
     async produce(request: ProofRequest, signal?: AbortSignal): Promise<ProducedProof> {
       signal?.throwIfAborted();
@@ -130,7 +136,10 @@ export function createHttpProofProvider(options: HttpProofProviderOptions): Proo
       }
       const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
       if (type !== proofMediaType) {
-        await response.body?.cancel();
+        try { await response.body?.cancel(); } catch (error) {
+          const reason = stopped(error);
+          if (reason !== undefined) throw reason;
+        }
         throw new ProofProviderError(statusFailure(response.status), `HTTP ${response.status} without a proof result`);
       }
       let result;
