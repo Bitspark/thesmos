@@ -19,11 +19,17 @@ independent review of the exact change, and squash merge after the required
 checks pass. The gate checks compiled law identity, frozen artifacts, conformance,
 TypeScript tests, the service examples and an independently installed tarball,
 including each entry point's import isolation, for code and declarations: the
-root and `/identity` import no search engine, signing library, network module or
-other entry; `/remote` additionally imports no filesystem module and reaches its
-provider only through the caller's `fetch`; `/archon` imports no search engine
+root, `/identity` and `/remote` import no search engine, signing library,
+network module, filesystem or module loader, or other entry, and `/remote`
+reaches its provider only through the caller's `fetch`; `/archon` imports no search engine
 or network module; and `/client` imports no network module. A consumer with no
 Logos kernel or Archon installed must type-check and use `/remote`.
+
+The library reads no files at runtime. `npm run build` first runs
+`scripts/embed-law.mjs`, which generates `core/ts/src/law.generated.ts` from
+`law/*.ontos` and `law/protocol.json`; that file is never edited or committed.
+The `law/` files stay the only source, compiled from `.logos` by
+`scripts/compile-law.ts` and pinned by `conformance/frozen.json`.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read

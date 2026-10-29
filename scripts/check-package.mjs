@@ -48,10 +48,11 @@ process.stdout.write(execFileSync(process.execPath, [join(directory, "check.mjs"
 // the entries that must not carry them: a receiver importing the root installs no search engine.
 const installed = join(directory, "node_modules", "@bitspark", "thesmos");
 const network = ["http", "https", "http2", "net", "tls", "dns", "dgram"].flatMap(name => [name, "node:" + name]);
-const filesystem = ["fs", "node:fs", "fs/promises", "node:fs/promises"];
+const filesystem = ["fs", "node:fs", "fs/promises", "node:fs/promises", "module", "node:module"];
 const entries = {
-  ".": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network], noEntries: true },
-  "./identity": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network], noEntries: true },
+  // The receiver and its helpers embed the frozen law: no search, signing, network or files.
+  ".": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network, ...filesystem], noEntries: true },
+  "./identity": { forbidden: ["@bitspark/logos-kernel", "@bitspark/archon", ...network, ...filesystem], noEntries: true },
   "./archon": { forbidden: ["@bitspark/logos-kernel", ...network] },
   "./client": { forbidden: [...network] },
   // The remote adapter reaches its provider through the caller's fetch: no kernel, signing or files.

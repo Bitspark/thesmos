@@ -1,15 +1,13 @@
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { Atom, ClauseId, programDigest, programFromValue } from "@bitspark/logos-contract";
 import { decode } from "@bitspark/ontos-codec";
-import protocolData from "@bitspark/thesmos/law/protocol.json" with { type: "json" };
+// The frozen law is embedded at build time (see scripts/compile-law.ts), so loading the library
+// reads no files: the verifier and every entry run in Node, browsers and edge runtimes alike.
+import {
+  assertionTemplateBytes as templateBytes, commonLawBytes as bytes, protocol,
+  spaceAsserterTemplateBytes as layerBytes,
+} from "./law.generated.js";
 
-// A plain constant, so the emitted declarations carry the shape and import no JSON module.
-export const protocol = protocolData;
-const require = createRequire(import.meta.url);
-const bytes = readFileSync(require.resolve("@bitspark/thesmos/law/common-law.ontos"));
-const templateBytes = readFileSync(require.resolve("@bitspark/thesmos/law/assertion-template.ontos"));
-const layerBytes = readFileSync(require.resolve("@bitspark/thesmos/law/layers/space-asserter-template.ontos"));
+export { protocol };
 export function loadLaw() { return programFromValue(decode(bytes)); }
 export function assertionTemplate() {
   return programFromValue(decode(templateBytes)).clause(ClauseId.of("assertion-template"))!;

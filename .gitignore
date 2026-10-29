@@ -3,3 +3,4 @@ dist/
 .build-artifacts/
 .worktrees/
 *.tgz
+core/ts/src/law.generated.ts
