@@ -81,8 +81,10 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
   go:
-    # The Go receiver (core/go). Its Logos contract module is private; the read-only
-    # LOGOS_SOURCE_READ_TOKEN reaches only Bitspark/logos. Ontos and archon are public.
+    # The Go receiver (core/go). Its Logos contract module is private. The service desk
+    # issues a read-only LOGOS_SOURCE_READ_TOKEN (Bitspark/logos contents only) for
+    # qualifying runs; without it this job only checks formatting and says so. A release
+    # needs a run in which this job's tests ran. Ontos and archon are public.
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
     runs-on: ubuntu-latest
     defaults:
@@ -99,10 +101,18 @@ jobs:
         with:
           go-version-file: core/go/go.mod
           cache-dependency-path: core/go/go.sum
+      - run: test -z "$(gofmt -l .)"
       - name: Read access to the private Logos module
+        id: access
         run: |
-          test -n "$LOGOS_SOURCE_READ_TOKEN" || { echo "::error::LOGOS_SOURCE_READ_TOKEN is not configured"; exit 1; }
+          if [ -z "$LOGOS_SOURCE_READ_TOKEN" ]; then
+            echo "::warning title=Go receiver not tested::LOGOS_SOURCE_READ_TOKEN is not configured, so this run did not build or test core/go."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git config --global url."https://x-access-token:${LOGOS_SOURCE_READ_TOKEN}@github.com/Bitspark/logos".insteadOf "https://github.com/Bitspark/logos"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
         env:
           LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
-      - run: test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go mod verify
+      - if: steps.access.outputs.ready == 'true'
+        run: go vet ./... && go test -v ./... && go mod verify
