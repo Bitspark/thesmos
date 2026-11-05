@@ -100,7 +100,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: core/go/go.mod
-          cache-dependency-path: core/go/go.sum
+          # No module cache: it would hold the private Logos source, and caches reach other runs.
+          cache: false
       - run: test -z "$(gofmt -l .)"
       - name: Read access to the private Logos module
         id: access
