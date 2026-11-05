@@ -80,3 +80,27 @@ jobs:
           path: .build-artifacts/*.tgz
           include-hidden-files: true
           if-no-files-found: error
+  go:
+    # The Go receiver (core/go). Its Logos contract module is private; the read-only
+    # LOGOS_SOURCE_READ_TOKEN reaches only Bitspark/logos. Ontos and archon are public.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/go
+    env:
+      GOPRIVATE: github.com/Bitspark/logos
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go/go.mod
+          cache-dependency-path: core/go/go.sum
+      - name: Read access to the private Logos module
+        run: git config --global url."https://x-access-token:${LOGOS_SOURCE_READ_TOKEN}@github.com/Bitspark/logos".insteadOf "https://github.com/Bitspark/logos"
+        env:
+          LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+      - run: test -z "$(gofmt -l .)" && go mod verify && go vet ./... && go test ./...
