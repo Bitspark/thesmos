@@ -7,6 +7,7 @@ package thesmos
 
 import (
 	"errors"
+	"fmt"
 
 	logos "github.com/Bitspark/logos/contract/go"
 	core "github.com/bitspark/ontos/core/go"
@@ -56,6 +57,9 @@ func NewVerifier(root core.Value, authenticate Authenticate) (*Verifier, error) 
 	if authenticate == nil {
 		return nil, errors.New("thesmos: an authentication adapter is required")
 	}
+	if root == nil {
+		return nil, errors.New("thesmos: a root is required")
+	}
 	anchor, err := inputLiteral(Fact("root", root))
 	if err != nil {
 		return nil, err
@@ -68,9 +72,18 @@ func NewVerifier(root core.Value, authenticate Authenticate) (*Verifier, error) 
 	}}, nil
 }
 
-// Verify checks proof, Ontos-encoded bytes, for exactly query. Any failure denies.
-func (v *Verifier) Verify(query Query, proofBytes []byte) Decision {
+// Verify checks proof, Ontos-encoded bytes, for exactly query. Any failure denies, including a
+// panic in the authentication adapter.
+func (v *Verifier) Verify(query Query, proofBytes []byte) (decision Decision) {
 	reject := func(code, detail string) Decision { return Decision{Code: code, Detail: detail} }
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			decision = reject(protocol.Results.Invalid, fmt.Sprint("verification failed: ", recovered))
+		}
+	}()
+	if query.Actor == nil || query.Space == nil || query.Statement == nil {
+		return reject(protocol.Results.Invalid, "query needs an actor, space and statement")
+	}
 	fail := func(err error) Decision {
 		var limit limitError
 		var authentication authenticationError
@@ -86,10 +99,10 @@ func (v *Verifier) Verify(query Query, proofBytes []byte) Decision {
 	if err != nil {
 		return fail(err)
 	}
-	if !p.law.Equal(LawDigest) {
+	if !p.law.Equal(lawDigest) {
 		return reject(protocol.Results.LawMismatch, "proof names another law")
 	}
-	if !p.layer.Equal(LayerDigest) {
+	if !p.layer.Equal(layerDigest) {
 		return reject(protocol.Results.LayerMismatch, "proof names another input layer")
 	}
 	program, err := suppliedProgram(p.bundles, v.authenticate)

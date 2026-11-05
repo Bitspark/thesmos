@@ -43,7 +43,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: node scripts/check-frozen.mjs && node scripts/check-links.mjs && git diff --check
+      - run: node scripts/check-frozen.mjs && node scripts/embed-law.mjs --check-go && node scripts/check-links.mjs && git diff --check
   sdk:
     # Private Logos packages are available only to maintained repository code.
     # External PRs receive the public source checks, pending dependency publication.
@@ -100,7 +100,9 @@ jobs:
           go-version-file: core/go/go.mod
           cache-dependency-path: core/go/go.sum
       - name: Read access to the private Logos module
-        run: git config --global url."https://x-access-token:${LOGOS_SOURCE_READ_TOKEN}@github.com/Bitspark/logos".insteadOf "https://github.com/Bitspark/logos"
+        run: |
+          test -n "$LOGOS_SOURCE_READ_TOKEN" || { echo "::error::LOGOS_SOURCE_READ_TOKEN is not configured"; exit 1; }
+          git config --global url."https://x-access-token:${LOGOS_SOURCE_READ_TOKEN}@github.com/Bitspark/logos".insteadOf "https://github.com/Bitspark/logos"
         env:
           LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
-      - run: test -z "$(gofmt -l .)" && go mod verify && go vet ./... && go test ./...
+      - run: test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go mod verify

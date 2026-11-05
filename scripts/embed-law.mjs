@@ -30,6 +30,8 @@ const goCopies = {
   "core/go/law/space-asserter-template.ontos": "layers/space-asserter-template.ontos",
   "core/go/law/protocol.json": "protocol.json",
   "core/go/testdata/conformance.ontos": "conformance.ontos",
+  "core/go/LICENSE": "../LICENSE",
+  "core/go/NOTICE": "../NOTICE",
 };
 if (process.argv.includes("--go") || process.argv.includes("--check-go")) {
   const stale = [];

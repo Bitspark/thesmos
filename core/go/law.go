@@ -79,7 +79,12 @@ var (
 )
 
 // LawDigest binds the executable law and assertion construction to one native program digest.
-var LawDigest = func() core.Atom {
+func LawDigest() core.Atom { return lawDigest }
+
+// LayerDigest is the space-asserter layer's own identity; the frozen core's identity is unchanged.
+func LayerDigest() core.Atom { return layerDigest }
+
+var lawDigest = func() core.Atom {
 	var clauses []logos.Clause
 	for _, entry := range loadLaw().Iter() {
 		clauses = append(clauses, entry.Clause)
@@ -88,8 +93,7 @@ var LawDigest = func() core.Atom {
 	return core.NewAtom(digest[:])
 }()
 
-// LayerDigest is the space-asserter layer's own identity; the frozen core's identity is unchanged.
-var LayerDigest = func() core.Atom {
+var layerDigest = func() core.Atom {
 	digest := logos.ProgramDigest([]logos.Clause{spaceAsserterTemplate})
 	return core.NewAtom(digest[:])
 }()

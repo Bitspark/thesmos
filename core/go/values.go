@@ -18,7 +18,8 @@ func Symbol(name string) (core.Atom, error) {
 
 func symbol(name string) core.Atom { return core.NewAtom([]byte(name)) }
 
-// Fact is a labeled Logos compound: the tuple (name, args...).
+// Fact is a labeled Logos compound: the tuple (name, args...). Names are taken as given; use
+// Symbol to check that an untrusted name is valid Unicode.
 func Fact(name string, args ...core.Value) core.Value {
 	return core.NewTuple(append([]core.Value{symbol(name)}, args...)...)
 }
@@ -32,7 +33,8 @@ func List(items ...core.Value) core.Value {
 	return out
 }
 
-// Path is a space path of UTF-8 byte segments. List keeps arbitrary byte keys as atoms.
+// Path is a space path of the segments' bytes, taken as given. List keeps arbitrary byte keys
+// as atoms.
 func Path(segments ...string) core.Value {
 	items := make([]core.Value, len(segments))
 	for i, segment := range segments {
