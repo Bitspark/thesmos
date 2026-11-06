@@ -148,7 +148,7 @@ void the_adapter_contract() {
   const Case c = read_corpus().at(0);
   for (const Case& each : read_corpus()) {
     if (!each.permitted) continue;
-    // An adapter that refuses, or throws, denies with the authentication code.
+    // An adapter that refuses denies as authentication-failed; one that throws, as invalid-proof.
     const thesmos::Verifier refuses(each.root, [](auto, const auto&, const auto&) { return false; });
     CHECK(refuses.verify(each.query, each.proof).code == "authentication-failed", "refusing adapter");
     const thesmos::Verifier throws(each.root, [](auto, const auto&, const auto&) -> bool {

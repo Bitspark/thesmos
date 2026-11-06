@@ -66,7 +66,9 @@ pub const THESMOS_NOT_AUTHENTICATED: i32 = 0;
 pub const THESMOS_AUTHENTICATED: i32 = 1;
 /// `thesmos_authenticate` could not answer (for example, the C++ adapter threw). The proof is
 /// denied as `invalid-proof`, as a failing adapter is in every other receiver. Any value other
-/// than the two answers is treated the same way.
+/// than the two answers is treated the same way: in C an unknown answer is a broken adapter.
+/// The denial unwinds into the receiver's catch, so this library must be built with
+/// `panic = "unwind"` (its default); under `panic = "abort"` a failure ends the process.
 pub const THESMOS_ADAPTER_FAILED: i32 = -1;
 
 /// Reports whether `supplier` authenticated exactly `payload` with `authentication`, as

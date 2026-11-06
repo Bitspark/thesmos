@@ -18,7 +18,9 @@
 
 // `thesmos_authenticate` could not answer (for example, the C++ adapter threw). The proof is
 // denied as `invalid-proof`, as a failing adapter is in every other receiver. Any value other
-// than the two answers is treated the same way.
+// than the two answers is treated the same way: in C an unknown answer is a broken adapter.
+// The denial unwinds into the receiver's catch, so this library must be built with
+// `panic = "unwind"` (its default); under `panic = "abort"` a failure ends the process.
 #define THESMOS_ADAPTER_FAILED -1
 
 // An immutable Ontos value (an atom or a tuple), owned by the caller.

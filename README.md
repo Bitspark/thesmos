@@ -202,8 +202,8 @@ decides exactly as `core/rs` does. Values are opaque handles to Ontos values, bu
 `thesmos::path`, `fact`, `symbol`, `Value::atom` and friends or decoded from canonical
 bytes. `thesmos::Verifier(root, callback)` takes your own authentication adapter: `false`
 denies as `authentication-failed`, and an exception it throws denies as `invalid-proof`, as a
-failing adapter does in every other receiver. No exception or panic crosses the C boundary. Its tests
-run `law/conformance.ontos` through a C++ adapter and the TypeScript-signed Archon proof
+failing adapter does in every other receiver. No exception or panic crosses the C boundary.
+Its tests run `law/conformance.ontos` through a C++ adapter and the TypeScript-signed Archon proof
 through the built-in one. Building needs the same Logos access as the Rust crate.
 
 Run `npm run build && npm run example`. The
