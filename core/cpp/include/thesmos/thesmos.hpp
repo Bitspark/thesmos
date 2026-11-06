@@ -205,7 +205,8 @@ struct Decision {
 };
 
 // Reports whether supplier authenticated exactly payload with authentication. It establishes key
-// identity only, never authority. An exception it throws denies.
+// identity only, never authority. false denies as authentication-failed; an exception it throws
+// denies as invalid-proof, as a failing adapter does in every other receiver.
 using Authenticate =
     std::function<bool(std::span<const std::uint8_t> payload, const Value& authentication, const Value& supplier)>;
 
@@ -253,15 +254,17 @@ class Verifier {
   Verifier(thesmos_verifier* handle, std::unique_ptr<Authenticate> authenticate)
       : authenticate_(std::move(authenticate)), handle_(handle) {}
 
-  // No exception may cross the C boundary: any exception denies.
-  static bool call(void* context, const std::uint8_t* payload, std::size_t payload_len,
-                   const thesmos_value* authentication, const thesmos_value* supplier) noexcept {
+  // No exception may cross the C boundary: an exception is reported as the adapter's failure.
+  static std::int32_t call(void* context, const std::uint8_t* payload, std::size_t payload_len,
+                           const thesmos_value* authentication, const thesmos_value* supplier) noexcept {
     try {
       const auto& authenticate = *static_cast<const Authenticate*>(context);
       return authenticate(std::span(payload, payload_len), Value::adopt(thesmos_value_clone(authentication)),
-                          Value::adopt(thesmos_value_clone(supplier)));
+                          Value::adopt(thesmos_value_clone(supplier)))
+                 ? THESMOS_AUTHENTICATED
+                 : THESMOS_NOT_AUTHENTICATED;
     } catch (...) {
-      return false;
+      return THESMOS_ADAPTER_FAILED;
     }
   }
 
