@@ -121,7 +121,8 @@ jobs:
     # The Rust receiver (core/rs), Windows first as its first consumer needs, then Linux and
     # macOS. logos-contract comes from the private Logos repository by tag, through the same
     # read-only LOGOS_SOURCE_READ_TOKEN as the Go job; without it this job only checks
-    # formatting and says so. A release needs a run in which these tests ran.
+    # formatting and says so. A release needs a run in which these tests ran. Only `cargo fetch`
+    # sees the token; everything that builds or runs code is offline and without it.
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
     strategy:
       fail-fast: false
@@ -147,14 +148,25 @@ jobs:
           if [ -z "$LOGOS_SOURCE_READ_TOKEN" ]; then
             echo "::warning title=Rust receiver not tested::LOGOS_SOURCE_READ_TOKEN is not configured, so this run did not build or test core/rs."
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
-          git config --global url."https://x-access-token:${LOGOS_SOURCE_READ_TOKEN}@github.com/Bitspark/logos".insteadOf "https://github.com/Bitspark/logos"
-          echo "ready=true" >> "$GITHUB_OUTPUT"
         env:
           LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+      # The token lives only in this step's environment, as a URL rewrite for git (which cargo
+      # uses to fetch); no git config file holds it and no build script or tool runs here.
+      - name: Fetch the locked sources
+        if: steps.access.outputs.ready == 'true'
+        run: cargo fetch --locked
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.LOGOS_SOURCE_READ_TOKEN }}@github.com/Bitspark/logos.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/Bitspark/logos
+      # Offline and without the token: dependency build scripts and proc macros never see it.
       - if: steps.access.outputs.ready == 'true'
+        env:
+          CARGO_NET_OFFLINE: 'true'
         run: |
-          cargo clippy --locked --all-targets -- -D warnings
-          cargo test --locked --no-fail-fast
-          cargo build --locked --no-default-features
+          cargo clippy --locked --offline --all-targets -- -D warnings
+          cargo test --locked --offline --no-fail-fast
+          cargo build --locked --offline --no-default-features
