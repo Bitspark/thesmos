@@ -91,9 +91,32 @@ head, only a commit with the same `core/` tree.
 
 A release cites one qualifying run in which the `go`, `rust`, `cpp`, `python`,
 `differential` and `consumer` jobs' tests ran on the release commit, or on a commit whose
-`core/` tree is identical (`git diff <that> <release> -- core` is empty). After tagging,
-the release notes also cite a passing `bash scripts/consumers/run.sh tag <release commit>
-<version>`, which shows that the tags consumers name resolve to the release commit.
+`core/` tree is identical (`git diff <that> <release> -- core` is empty). The `release`
+workflow makes the release and checks this rule itself:
+
+1. A release PR sets the new version in every field (`node scripts/embed-law.mjs
+   --check-rs` names any it missed: the manifests, their lock entries and CMake's
+   numeric version) and adds `docs/releases/v<version>.md`. Its first line,
+   `# v<version>: <title>`, names the release; the rest is its notes.
+2. The PR's head gets one `check` run with Logos access, the qualifying run.
+3. After that access is removed, the PR is squash-merged. The merge commit on main is
+   the release commit, and its `check` run builds the npm archive.
+4. Dispatch `release` from main with the version, the release commit and the
+   qualifying run and attempt, in mode `rehearse`, then `release`. Both modes check
+   through the API that the qualifying run succeeded on a commit with the release
+   commit's `core/` tree, and that each of its Logos jobs ran every step: a run
+   without the token skips some, and is refused. They also check that every version
+   field at the release commit agrees and that the tags are absent or already at the
+   release commit. `release` then waits for approval in the `release` environment. It
+   creates `v<version>` and `core/go/v<version>` at the release commit and the GitHub
+   release with the archive, `release-manifest.json` and `SHA256SUMS`, or finishes a
+   partial release; it never moves a tag or replaces a file. It ends with `verify`,
+   which can also be dispatched alone: the tags resolve to the release commit
+   (`run.sh tag`) and the files match `SHA256SUMS`.
+
+`bash scripts/release/release.sh check|candidate|publish --dry-run|verify` runs the same
+steps locally with an authenticated `gh`. No package registry is published to while
+Logos is private (#49, #12).
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read
