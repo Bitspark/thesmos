@@ -49,6 +49,15 @@ TypeScript, Go and Rust, and all three pass the corpus and the Archon vector. Ru
 `cargo test` in `core/rs` with `CARGO_NET_GIT_FETCH_WITH_CLI=true` and git read
 access to Bitspark/logos. The `rust` CI job (Windows, Linux, macOS) uses the same
 token and the same warning.
+
+The C and C++ receiver in `core/cpp` is the Rust receiver behind a C ABI: it has no
+receiver logic or law copy of its own, so a receiver change reaches it through
+`core/rs`. After changing `core/cpp/src/lib.rs`, regenerate the committed header with
+`cbindgen --config cbindgen.toml --output include/thesmos/thesmos.h src/lib.rs` in
+`core/cpp` (cbindgen 0.29.4); the `cpp-header` CI job fails on any difference. Build and test
+with `cmake -S core/cpp -B build && cmake --build build && ctest --test-dir build`,
+which needs the same Logos access and OpenSSL 3 for the corpus's example keys. The
+`cpp` job (Linux, macOS) uses the same token and the same warning.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read

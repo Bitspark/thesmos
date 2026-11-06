@@ -1,0 +1,6 @@
+# The same pin as core/rs, whose crate this library builds: CI tests exactly the minimum
+# supported Rust. CMake's build directory sits below this file, so Corrosion's Cargo uses it too.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
