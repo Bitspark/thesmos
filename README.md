@@ -274,6 +274,7 @@ measurement cases, not delegation limits.
 | [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter; `/identity` issuer/subject profile; `/remote` proof-provider contract and HTTP adapter |
 | [conformance/](conformance/frozen.json) | Frozen artifact pins; original corpus is `law/conformance.ontos` |
 | [core/ts/test/](core/ts/test/sdk.test.ts) | Core, asserter, mutation and client tests |
+| [docs/languages.md](docs/languages.md) | What each language offers, linked to the code that implements it |
 | [docs/model.md](docs/model.md) | Model, trusted facts and implementation boundaries |
 | [docs/foundations.md](docs/foundations.md) | How the public Constellation contracts are used |
 | [docs/runtime.md](docs/runtime.md) | Decision record for the shared runtime: placement, result contract, admitted profile |

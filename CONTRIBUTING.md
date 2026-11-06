@@ -77,6 +77,11 @@ reproduces a CI run and `--langs ts,go,rs` narrows it. C++ decides through its C
 interface, so the comparison covers that layer too. The `differential` CI job runs it
 with a fixed seed and with the run's own seed.
 
+[docs/languages.md](docs/languages.md) shows what each language offers and links each
+entry to the line that implements it. A change that adds, removes or moves a public
+entry point in any language updates it. `scripts/check-links.mjs` fails when a linked
+line no longer holds the code its link names.
+
 Each receiver must also work as an outside project gets it.
 `bash scripts/consumers/run.sh prepare <commit> <dir>` makes a fresh Go module, a Rust
 crate with a git dependency, a pip virtual environment and a CMake project with
