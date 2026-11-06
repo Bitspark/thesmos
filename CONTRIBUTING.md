@@ -59,8 +59,17 @@ with `cmake -S core/cpp -B build && cmake --build build && ctest --test-dir buil
 which needs the same Logos access and OpenSSL 3 for the corpus's example keys. The
 `cpp` job (Linux, macOS) uses the same token and the same warning.
 
-A release cites one qualifying run in which the `go`, `rust` and `cpp` jobs' tests
-ran on the release commit, or on a commit whose `core/` tree is identical
+The Python receiver in `core/py` is the Rust receiver behind PyO3, likewise with no
+receiver logic or law copy of its own. Keep `core/py/thesmos.pyi` in step with
+`core/py/src/lib.rs`. Build and test it in a virtual environment with
+`pip install maturin pytest cryptography`, `maturin develop --locked` and
+`pytest core/py/tests`, which needs the same Logos access. On a `windows-gnu` Rust
+toolchain, PyO3 also needs MinGW's `dlltool` on `PATH`. The `python` job (Windows,
+Linux, macOS; CPython 3.10 and 3.13) uses the same token and the same warning, and
+never uploads a wheel, which would hold compiled Logos code.
+
+A release cites one qualifying run in which the `go`, `rust`, `cpp` and `python`
+jobs' tests ran on the release commit, or on a commit whose `core/` tree is identical
 (`git diff <that> <release> -- core` is empty).
 Treat test fixtures as evidence, not permission to change the model.
 

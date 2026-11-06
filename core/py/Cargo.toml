@@ -1,0 +1,29 @@
+[package]
+name = "bitspark-thesmos-py"
+version = "1.0.0-preview.5"
+edition = "2021"
+rust-version = "1.96"
+license = "Apache-2.0"
+repository = "https://github.com/Bitspark/thesmos"
+description = "The Python binding of the Rust Spaces receiver (the `thesmos` module)."
+publish = false
+
+# The Python receiver is this extension module: the Rust receiver (core/rs) behind PyO3. It adds
+# no authority rule, decoding or checking of its own; every decision is core/rs's, made by
+# Logos's Rust checker.
+[lib]
+name = "thesmos"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+receiver = { package = "bitspark-thesmos", path = "../rs" }
+ontos-core = { package = "bitspark-ontos-core", version = "=0.13.0" }
+ontos-codec = { package = "bitspark-ontos-codec", version = "=0.13.0" }
+logos-contract = { git = "https://github.com/Bitspark/logos", tag = "v0.24.0" }
+# One wheel per platform for every CPython from 3.10 on.
+pyo3 = { version = "=0.30.1", features = ["extension-module", "abi3-py310"] }
+
+[profile.release]
+# The adapter's exceptions deny through the receiver's panic catch, which needs unwinding.
+panic = "unwind"
