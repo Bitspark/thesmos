@@ -111,6 +111,35 @@ Custom authentication can implement the small callback instead. The adapter
 uses Archon's Ed25519ph context `thesmos/space-facts/v1`, exact Ontos payload
 bytes, public-key atoms and signature atoms. It adds no authority policy.
 
+### Go receiver
+
+Go services verify the same proofs with `github.com/Bitspark/thesmos/core/go`, which
+needs no Node runtime or WASM loader:
+
+```go
+import (
+	thesmos "github.com/Bitspark/thesmos/core/go"
+	"github.com/Bitspark/thesmos/core/go/archon"
+)
+
+verifier, err := thesmos.NewVerifier(configuredRoot, archon.Authenticate)
+decision := verifier.Verify(thesmos.Query{Actor: actor, Space: space, Statement: statement}, callerProof)
+if !decision.Permitted {
+	return // the service performs its operation only after acceptance
+}
+```
+
+It is the receiver only: it checks supplied proofs and runs no search. Like the
+TypeScript verifier, it hand-writes no authority rule. It embeds the frozen law
+and layer as data and leaves the decision to Logos's Go checker
+(`github.com/Bitspark/logos/contract/go` v0.24.0), with Ontos v0.13.0 values and
+archon's Go core v0.16.0 for the same `thesmos/space-facts/v1` signatures. Its tests
+run the frozen corpus `law/conformance.ontos` and an Archon-signed proof made by
+the TypeScript SDK, which the TypeScript suite checks too, so both receivers accept
+the same bytes. Go module versions are tagged `core/go/v<version>` with the same
+version as the npm package. The Logos module is private: set
+`GOPRIVATE=github.com/Bitspark/logos` and give git read access to that repository.
+
 Run `npm run build && npm run example`. The
 [document service](examples/document-service.ts) carries root → team → docs
 asserter outputs and Alice's grant to Bob. The receiver verifies the chain
@@ -143,6 +172,7 @@ measurement cases, not delegation limits.
 | Location | Responsibility |
 | --- | --- |
 | [law/](law/common-law.logos) | Frozen common law and compiled Ontos data; separate asserter template. Embedded into the library at build time, so the root, `/identity` and `/remote` read no files at runtime |
+| [core/go/](core/go/verifier.go) | Go receiver: the same verification over Logos's Go checker; `archon` authentication adapter; a committed byte copy of `law/` |
 | [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter; `/identity` issuer/subject profile; `/remote` proof-provider contract and HTTP adapter |
 | [conformance/](conformance/frozen.json) | Frozen artifact pins; original corpus is `law/conformance.ontos` |
 | [core/ts/test/](core/ts/test/sdk.test.ts) | Core, asserter, mutation and client tests |

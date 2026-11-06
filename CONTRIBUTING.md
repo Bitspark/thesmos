@@ -31,6 +31,16 @@ kernel still loads its WASM binary). `npm run build` first runs
 `law/*.ontos` and `law/protocol.json`; that file is never edited or committed.
 The `law/` files stay the only source, compiled from `.logos` by
 `scripts/compile-law.ts` and pinned by `conformance/frozen.json`.
+
+The Go receiver in `core/go` is fetched as source with no build step, so it embeds
+a committed byte copy of `law/` and the corpus (`node scripts/embed-law.mjs --go`).
+`npm run law:check` fails if that copy differs. Keep Go and TypeScript decisions
+identical: a receiver change lands in both, and both pass `law/conformance.ontos`
+and the shared Archon vector (`scripts/export-archon-vector.mjs`). Run
+`go test ./...` in `core/go` with `GOPRIVATE=github.com/Bitspark/logos`. In CI the
+`go` job tests only when the service desk has issued its read-only
+`LOGOS_SOURCE_READ_TOKEN`, and otherwise warns that Go was not tested. A release
+needs a qualifying run in which that job's tests ran.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read

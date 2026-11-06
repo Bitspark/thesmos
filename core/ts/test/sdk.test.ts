@@ -11,6 +11,7 @@ import { decodeCases } from "./fixtures/conformance-format.js";
 import { confer, deviceProof, documentProof, releaseProof, ROOT, rootCounts, rootGrant, rootSupplied } from "./fixtures/proofs.js";
 import { DocumentService, DeviceService, ReleaseService } from "./fixtures/services.js";
 import { authenticateExampleFacts } from "./fixtures/authentication.js";
+import { authenticateArchon } from "../src/archon.js";
 import { protocol } from "../src/data.js";
 import { assertionTemplateBytes, commonLawBytes, protocol as embeddedProtocol, spaceAsserterTemplateBytes } from "../src/law.generated.js";
 import { attributedClause, executableClause, literalValue } from "../src/encoding.js";
@@ -30,6 +31,17 @@ test("the embedded law is exactly the frozen law/ artifacts", () => {
   assert.deepEqual(spaceAsserterTemplateBytes, file("layers/space-asserter-template.ontos"));
   assert.deepEqual(embeddedProtocol, JSON.parse(readFileSync(require.resolve("@bitspark/thesmos/law/protocol.json"), "utf8")));
   assert.equal(protocol, embeddedProtocol);
+});
+
+test("the Go module's Archon vector verifies here too, so both receivers accept the same bytes", () => {
+  // Written by scripts/export-archon-vector.mjs; core/go/archon checks the same file.
+  const vector = decode(readFileSync(new URL("../../../../core/go/testdata/archon-document.ontos", import.meta.url)));
+  assert.ok(vector instanceof Tuple && vector.length === 3);
+  const [root, q, proof] = vector.items();
+  assert.ok(q instanceof Tuple && proof instanceof Atom);
+  const query = { actor: q.at(0)!, space: q.at(1)!, statement: q.at(2)! };
+  const result = createSpacesVerifier({ root: root!, authenticate: authenticateArchon }).verify({ query, proof: proof.bytes() });
+  assert.equal(result.permitted, true, JSON.stringify(result));
 });
 
 test("sample services execute only the operation whose query the proof establishes", () => {
