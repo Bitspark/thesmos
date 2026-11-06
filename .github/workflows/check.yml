@@ -103,7 +103,7 @@ jobs:
           # No module cache: it would hold the private Logos source, and caches reach other runs.
           cache: false
       - run: test -z "$(gofmt -l .)"
-      - name: Read access to the private Logos module
+      - name: Fetch the private Logos module, then drop access
         id: access
         run: |
           if [ -z "$LOGOS_SOURCE_READ_TOKEN" ]; then
@@ -111,12 +111,20 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git config --global url."https://x-access-token:${LOGOS_SOURCE_READ_TOKEN}@github.com/Bitspark/logos".insteadOf "https://github.com/Bitspark/logos"
+          # The token exists only in this one command's environment: git reads the URL rewrite
+          # from GIT_CONFIG_*, nothing is written to a git config, and no Go tool, test or
+          # later step can see it. Everything after this runs offline.
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="url.https://x-access-token:${LOGOS_SOURCE_READ_TOKEN}@github.com/Bitspark/logos.insteadOf" \
+            GIT_CONFIG_VALUE_0="https://github.com/Bitspark/logos" \
+            go mod download
           echo "ready=true" >> "$GITHUB_OUTPUT"
         env:
           LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
       - if: steps.access.outputs.ready == 'true'
         run: go vet ./... && go test -v ./... && go mod verify
+        env:
+          GOPROXY: 'off'
   rust:
     # The Rust receiver (core/rs), Windows first as its first consumer needs, then Linux and
     # macOS. logos-contract comes from the private Logos repository by tag, through the same
