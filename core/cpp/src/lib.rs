@@ -20,7 +20,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use std::ffi::{c_char, c_void};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::{ptr, slice};
 
 use ontos_core::Value;
@@ -59,10 +59,24 @@ pub struct ThesmosDecision {
     pub detail: ThesmosBuffer,
 }
 
-/// Reports whether `supplier` authenticated exactly `payload` with `authentication`. It
-/// establishes key identity only, never authority. The value pointers are borrowed for the call:
-/// do not free or retain them. It must not unwind (a C++ exception must not escape it) and must
-/// be safe to call from every thread that calls `thesmos_verify` with this verifier.
+/// `thesmos_authenticate`'s answer: `supplier` did not authenticate the payload. The proof is
+/// denied as `authentication-failed`.
+pub const THESMOS_NOT_AUTHENTICATED: i32 = 0;
+/// `thesmos_authenticate`'s answer: `supplier` authenticated exactly the payload.
+pub const THESMOS_AUTHENTICATED: i32 = 1;
+/// `thesmos_authenticate` could not answer (for example, the C++ adapter threw). The proof is
+/// denied as `invalid-proof`, as a failing adapter is in every other receiver. Any value other
+/// than the two answers is treated the same way: in C an unknown answer is a broken adapter.
+/// The denial unwinds into the receiver's catch, so this library must be built with
+/// `panic = "unwind"` (its default); under `panic = "abort"` a failure ends the process.
+pub const THESMOS_ADAPTER_FAILED: i32 = -1;
+
+/// Reports whether `supplier` authenticated exactly `payload` with `authentication`, as
+/// `THESMOS_AUTHENTICATED` or `THESMOS_NOT_AUTHENTICATED`, or `THESMOS_ADAPTER_FAILED` if it
+/// could not answer. It establishes key identity only, never authority. The value pointers are
+/// borrowed for the call: do not free or retain them. It must not unwind (a C++ exception must
+/// not escape it) and must be safe to call from every thread that calls `thesmos_verify` with
+/// this verifier.
 pub type ThesmosAuthenticate = Option<
     unsafe extern "C" fn(
         context: *mut c_void,
@@ -70,11 +84,11 @@ pub type ThesmosAuthenticate = Option<
         payload_len: usize,
         authentication: *const ThesmosValue,
         supplier: *const ThesmosValue,
-    ) -> bool,
+    ) -> i32,
 >;
 
 struct Callback {
-    function: unsafe extern "C" fn(*mut c_void, *const u8, usize, *const ThesmosValue, *const ThesmosValue) -> bool,
+    function: unsafe extern "C" fn(*mut c_void, *const u8, usize, *const ThesmosValue, *const ThesmosValue) -> i32,
     context: *mut c_void,
 }
 
@@ -89,8 +103,14 @@ impl Callback {
         // Handles the callback borrows for the call; they are released when it returns.
         let authentication = ThesmosValue(bundle.authentication.clone());
         let supplier = ThesmosValue(supplier.clone());
-        unsafe {
+        let answer = unsafe {
             (self.function)(self.context, bundle.payload.as_ptr(), bundle.payload.len(), &authentication, &supplier)
+        };
+        match answer {
+            THESMOS_AUTHENTICATED => true,
+            THESMOS_NOT_AUTHENTICATED => false,
+            // Unwinds into the receiver's catch, which denies as invalid-proof; no panic hook runs.
+            _ => resume_unwind(Box::new("the authentication adapter failed")),
         }
     }
 }

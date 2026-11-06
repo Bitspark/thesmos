@@ -148,14 +148,36 @@ void the_adapter_contract() {
   const Case c = read_corpus().at(0);
   for (const Case& each : read_corpus()) {
     if (!each.permitted) continue;
-    // An adapter that refuses, or throws, denies with the authentication code.
+    // An adapter that refuses denies as authentication-failed; one that throws, as invalid-proof.
     const thesmos::Verifier refuses(each.root, [](auto, const auto&, const auto&) { return false; });
     CHECK(refuses.verify(each.query, each.proof).code == "authentication-failed", "refusing adapter");
     const thesmos::Verifier throws(each.root, [](auto, const auto&, const auto&) -> bool {
       throw std::runtime_error("adapter failure");
     });
     const thesmos::Decision thrown = throws.verify(each.query, each.proof);
-    CHECK(!thrown.permitted, "throwing adapter permitted: %s", thrown.code.c_str());
+    CHECK(!thrown.permitted && thrown.code == "invalid-proof", "throwing adapter: %s", thrown.code.c_str());
+    // The C callback's answers, directly: only the two answers are answers, anything else fails.
+    const std::pair<std::int32_t, std::string> answers[] = {
+        {THESMOS_NOT_AUTHENTICATED, "authentication-failed"},
+        {THESMOS_ADAPTER_FAILED, "invalid-proof"},
+        {7, "invalid-proof"},
+    };
+    for (const auto& [answer, code] : answers) {
+      std::int32_t reply = answer;
+      thesmos_verifier* raw = thesmos_verifier_new(
+          each.root.get(),
+          [](void* context, const std::uint8_t*, std::size_t, const thesmos_value*,
+             const thesmos_value*) -> std::int32_t { return *static_cast<const std::int32_t*>(context); },
+          &reply);
+      thesmos_decision out{};
+      CHECK(raw != nullptr && thesmos_verify(raw, each.query.actor.get(), each.query.space.get(),
+                                             each.query.statement.get(), each.proof.data(), each.proof.size(), &out),
+            "C verifier");
+      const std::string got(reinterpret_cast<const char*>(out.code.data), out.code.len);
+      CHECK(!out.permitted && got == code, "C callback answer %d: %s", static_cast<int>(answer), got.c_str());
+      thesmos_decision_free(&out);
+      thesmos_verifier_free(raw);
+    }
     break;
   }
   bool threw = false;

@@ -9,6 +9,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// `thesmos_authenticate`'s answer: `supplier` did not authenticate the payload. The proof is
+// denied as `authentication-failed`.
+#define THESMOS_NOT_AUTHENTICATED 0
+
+// `thesmos_authenticate`'s answer: `supplier` authenticated exactly the payload.
+#define THESMOS_AUTHENTICATED 1
+
+// `thesmos_authenticate` could not answer (for example, the C++ adapter threw). The proof is
+// denied as `invalid-proof`, as a failing adapter is in every other receiver. Any value other
+// than the two answers is treated the same way: in C an unknown answer is a broken adapter.
+// The denial unwinds into the receiver's catch, so this library must be built with
+// `panic = "unwind"` (its default); under `panic = "abort"` a failure ends the process.
+#define THESMOS_ADAPTER_FAILED -1
+
 // An immutable Ontos value (an atom or a tuple), owned by the caller.
 // Release it with `thesmos_value_free`.
 typedef struct thesmos_value thesmos_value;
@@ -30,15 +44,17 @@ typedef struct thesmos_bytes {
   size_t len;
 } thesmos_bytes;
 
-// Reports whether `supplier` authenticated exactly `payload` with `authentication`. It
-// establishes key identity only, never authority. The value pointers are borrowed for the call:
-// do not free or retain them. It must not unwind (a C++ exception must not escape it) and must
-// be safe to call from every thread that calls `thesmos_verify` with this verifier.
-typedef bool (*thesmos_authenticate)(void *context,
-                                     const uint8_t *payload,
-                                     size_t payload_len,
-                                     const struct thesmos_value *authentication,
-                                     const struct thesmos_value *supplier);
+// Reports whether `supplier` authenticated exactly `payload` with `authentication`, as
+// `THESMOS_AUTHENTICATED` or `THESMOS_NOT_AUTHENTICATED`, or `THESMOS_ADAPTER_FAILED` if it
+// could not answer. It establishes key identity only, never authority. The value pointers are
+// borrowed for the call: do not free or retain them. It must not unwind (a C++ exception must
+// not escape it) and must be safe to call from every thread that calls `thesmos_verify` with
+// this verifier.
+typedef int32_t (*thesmos_authenticate)(void *context,
+                                        const uint8_t *payload,
+                                        size_t payload_len,
+                                        const struct thesmos_value *authentication,
+                                        const struct thesmos_value *supplier);
 
 // A verification result. `code` is one of the protocol's result codes (law/protocol.json), as
 // UTF-8 without a terminator; `detail` is diagnostic only. Release it with

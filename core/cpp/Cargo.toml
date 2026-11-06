@@ -23,7 +23,9 @@ ontos-codec = { package = "bitspark-ontos-codec", version = "=0.13.0" }
 ontos-data = { package = "bitspark-ontos-data", version = "=0.13.0" }
 
 [profile.release]
-# A panic never crosses the C boundary: every entry point catches it. Unwinding is required.
+# A panic never crosses the C boundary: every entry point catches it. Unwinding is required, and
+# an adapter failure (THESMOS_ADAPTER_FAILED, or a C++ exception) is denied through it. Built with
+# panic = "abort", such a failure ends the process instead of denying.
 panic = "unwind"
 # Keep debug-info stripping to the consumer's linker (rust-objcopy aborts on macOS runners).
 strip = false
