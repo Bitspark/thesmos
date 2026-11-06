@@ -263,3 +263,71 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
           ctest --test-dir build --output-on-failure -C Release
+  python:
+    # The Python receiver (core/py): core/rs behind PyO3, one abi3 wheel per platform for
+    # CPython 3.10 and later, tested on the oldest and newest supported Python. Building needs
+    # the same read-only LOGOS_SOURCE_READ_TOKEN as the Rust job; without it this job checks
+    # only formatting and says so. A release needs a run in which these tests ran. Only
+    # `cargo fetch` sees the token; the wheel build, its install and the tests run offline and
+    # without it. A wheel holds compiled Logos code, so it is never uploaded.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ['3.10', '3.13']
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: core/py
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      CARGO_TERM_COLOR: never
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # core/py/rust-toolchain.toml pins the same Rust as core/rs; install exactly it.
+      - run: rustup toolchain install && rustup show active-toolchain && cargo fmt --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Read access to the private Logos crate
+        id: access
+        run: |
+          if [ -z "$LOGOS_SOURCE_READ_TOKEN" ]; then
+            echo "::warning title=Python receiver not tested::LOGOS_SOURCE_READ_TOKEN is not configured, so this run did not build or test core/py."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+      # The token lives only in this step's environment, as a URL rewrite for git, and must not
+      # reach a file.
+      - name: Fetch the locked sources
+        if: steps.access.outputs.ready == 'true'
+        run: |
+          cargo fetch --locked
+          if grep -rqF -- "$LOGOS_SOURCE_READ_TOKEN" "$HOME/.gitconfig" "${CARGO_HOME:-$HOME/.cargo}" 2>/dev/null; then
+            echo "::error::the Logos token reached a file during the fetch"
+            exit 1
+          fi
+        env:
+          LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.LOGOS_SOURCE_READ_TOKEN }}@github.com/Bitspark/logos.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/Bitspark/logos
+      # Third-party Python tools are installed only after the fetch, so nothing they bring
+      # (for example a `git` on PATH) can run while the token exists.
+      - if: steps.access.outputs.ready == 'true'
+        env:
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          cargo clippy --locked --offline -- -D warnings
+          python -m pip install maturin==1.15.0 pytest==8.4.2 cryptography==49.0.0
+          python -m maturin build --release --locked --offline --out dist
+          python -m pip install --no-index --find-links dist bitspark-thesmos
+          python -m pytest -q tests

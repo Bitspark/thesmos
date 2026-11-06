@@ -22,7 +22,9 @@ implementations only, rather than placeholder packages: the TypeScript SDK, and 
 (`core/go`) and Rust (`core/rs`) receivers, built on the same foundations' Go and
 Rust cores (Logos contract, Ontos and archon at the pinned versions). Another
 language is added when a consumer needs it, held to the same corpus. A language
-without a Logos checker binds an existing receiver instead of porting the checker.
+without a Logos checker binds an existing receiver instead of porting the checker:
+C and C++ (`core/cpp`) and Python (`core/py`) bind the Rust receiver, so they decide
+exactly as it does.
 Ontos 0.13.0 is pinned to match the selected Logos 0.24.0 dependency cohort;
 the inspected Ontos main reports 0.14.0. Upgrading one side alone can produce
 incompatible JavaScript class identities even when the value semantics agree.

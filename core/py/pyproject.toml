@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "bitspark-thesmos"
+description = "The Spaces authority receiver for Python: verify a supplied proof under the frozen law, with Logos's Rust checker."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dynamic = ["version"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+]
+
+[project.urls]
+Repository = "https://github.com/Bitspark/thesmos"
+
+[tool.maturin]
+module-name = "thesmos"
+# --locked and the committed Cargo.lock: the wheel is built from exactly the reviewed dependencies.
+locked = true

@@ -1,0 +1,6 @@
+# The same pin as core/rs, whose crate this extension builds: CI tests exactly the minimum
+# supported Rust.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
