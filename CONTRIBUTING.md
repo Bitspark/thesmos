@@ -83,16 +83,17 @@ crate with a git dependency, a pip virtual environment and a CMake project with
 FetchContent, each taking thesmos at that commit as README.md shows with a tag. `verify`
 builds them with Cargo and Go offline and checks that each accepts the TypeScript-signed
 Archon proof and denies it with one changed byte. Only `prepare` needs Logos access. The
-`consumer` CI job runs both on the commit under test. A release is qualified on its commit
-before it is tagged; after tagging, `run.sh tag <commit> <version>` checks without Logos
-access that `v<version>` and the Go module's `core/go/v<version>` (through
-proxy.golang.org) resolve to that commit.
+`consumer` CI job runs both on the commit under test. A release is qualified before it is
+tagged; after tagging, `run.sh tag <release commit> <version>` checks without Logos access
+that `v<version>` and the Go module's `core/go/v<version>` (through proxy.golang.org)
+resolve to the release commit on main. With squash merges that is not the qualified PR
+head, only a commit with the same `core/` tree.
 
 A release cites one qualifying run in which the `go`, `rust`, `cpp`, `python`,
 `differential` and `consumer` jobs' tests ran on the release commit, or on a commit whose
 `core/` tree is identical (`git diff <that> <release> -- core` is empty). After tagging,
-the release notes also cite a passing `bash scripts/consumers/run.sh tag <that commit>
-<version>`, which shows that the tags consumers name resolve to the qualified commit.
+the release notes also cite a passing `bash scripts/consumers/run.sh tag <release commit>
+<version>`, which shows that the tags consumers name resolve to the release commit.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read

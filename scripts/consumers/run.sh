@@ -19,10 +19,11 @@
 # "git+…@<commit>#subdirectory=core/py" into a fresh virtual environment, and a CMake project
 # with FetchContent at <commit>. pip still fetches its build backend, and CMake its sources.
 #
-# A release is qualified on its commit before it is tagged. After tagging, tag checks without
-# Logos access that the tags consumers name resolve to that commit: the root tag v<version>
-# (Cargo, pip, FetchContent) through git, and the Go module's core/go/v<version> through
-# proxy.golang.org, as a Go consumer resolves it.
+# A release is qualified before it is tagged, usually on its PR head. After tagging, tag checks
+# without Logos access that the tags consumers name resolve to <commit>, the release commit on
+# main that the tags point to (with squash merges not the qualified PR head, whose core/ tree it
+# carries): the root tag v<version> (Cargo, pip, FetchContent) through git, and the Go module's
+# core/go/v<version> through proxy.golang.org, as a Go consumer resolves it.
 set -euo pipefail
 
 phase=${1:?phase}
