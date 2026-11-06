@@ -1,5 +1,6 @@
 """The Spaces authority receiver: the Rust receiver behind PyO3. Every decision is Logos's checker's."""
 
+import builtins
 from collections.abc import Callable, Sequence
 
 ARCHON_DOMAIN: str
@@ -20,7 +21,7 @@ class Value:
     @property
     def bytes(self) -> bytes | None: ...
     @property
-    def items(self) -> list[Value] | None: ...
+    def items(self) -> builtins.list[Value] | None: ...
     def __eq__(self, other: object) -> bool: ...
     def __hash__(self) -> int: ...
 
@@ -64,13 +65,14 @@ class SpaceFacts:
     @property
     def asserted_at(self) -> Value: ...
     @property
-    def clauses(self) -> list[Value]: ...
+    def clauses(self) -> builtins.list[Value]: ...
 
 class Verifier:
     """Checks supplied proofs under one configured root. No temporal policy, search, network or clock."""
 
     def __init__(self, root: Value, authenticate: Callable[[Bundle, Value], bool]) -> None:
-        """Only `True` authenticates: any other result is authentication-failed; an exception, invalid-proof."""
+        """Only the bool `True` authenticates: any other result is authentication-failed; an exception,
+        invalid-proof. A KeyboardInterrupt or SystemExit raised by the adapter propagates from `verify`."""
     @staticmethod
     def archon(root: Value) -> Verifier:
         """A verifier with the built-in Archon adapter, which runs without calling back into Python."""

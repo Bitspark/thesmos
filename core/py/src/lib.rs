@@ -8,11 +8,15 @@ use pyo3::prelude::*;
 
 #[pymodule]
 mod thesmos {
+    use std::cell::RefCell;
     use std::panic::resume_unwind;
+    use std::sync::{Arc, Mutex};
 
-    use pyo3::exceptions::{PyTypeError, PyValueError};
+    use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
+    use pyo3::gc::PyVisit;
     use pyo3::prelude::*;
-    use pyo3::types::PyBytes;
+    use pyo3::types::{PyBool, PyBytes};
+    use pyo3::PyTraverseError;
 
     use receiver as rs;
 
@@ -160,58 +164,102 @@ mod thesmos {
         clauses: Vec<Value>,
     }
 
+    thread_local! {
+        // A KeyboardInterrupt or SystemExit raised in an adapter. The receiver denies as usual,
+        // then `verify` raises it again rather than swallowing it.
+        static INTERRUPT: RefCell<Option<PyErr>> = const { RefCell::new(None) };
+    }
+
+    /// The Python adapter, shared by the receiver's callback and the garbage collector, so that a
+    /// verifier held by its own adapter's object can still be collected.
+    type Adapter = Arc<Mutex<Option<Py<PyAny>>>>;
+
     /// Checks supplied proofs under one configured root. It has no temporal policy and runs no
     /// search, network or clock.
     #[pyclass(frozen, module = "thesmos")]
-    pub struct Verifier(rs::Verifier);
+    pub struct Verifier {
+        receiver: rs::Verifier,
+        adapter: Option<Adapter>,
+    }
 
     #[pymethods]
     impl Verifier {
         /// `authenticate(bundle, supplier) -> bool` reports whether `supplier` authenticated
-        /// exactly `bundle.payload`; it establishes key identity only, never authority. Only
-        /// `True` authenticates: any other result denies as `authentication-failed`, and an
-        /// exception it raises denies as `invalid-proof`, as in every receiver.
+        /// exactly `bundle.payload`; it establishes key identity only, never authority. Only the
+        /// bool `True` authenticates: any other result denies as `authentication-failed`, and an
+        /// exception it raises denies as `invalid-proof`, as in every receiver. A
+        /// KeyboardInterrupt or SystemExit it raises propagates out of `verify`.
         #[new]
         fn new(root: Value, authenticate: Bound<'_, PyAny>) -> PyResult<Self> {
             if !authenticate.is_callable() {
                 return Err(PyTypeError::new_err("authenticate must be callable"));
             }
-            let authenticate = authenticate.unbind();
-            let adapter = move |bundle: &rs::Bundle, supplier: &ontos_core::Value| -> bool {
+            let adapter: Adapter = Arc::new(Mutex::new(Some(authenticate.unbind())));
+            let shared = Arc::clone(&adapter);
+            let callback = move |bundle: &rs::Bundle, supplier: &ontos_core::Value| -> bool {
                 Python::attach(|py| {
+                    // The lock is held only to take a reference, so an adapter may call verify.
+                    let current = shared.lock().ok().and_then(|slot| slot.as_ref().map(|a| a.clone_ref(py)));
+                    let Some(authenticate) = current else {
+                        resume_unwind(Box::new("the authentication adapter was cleared".to_owned()))
+                    };
                     match authenticate.call1(py, (Bundle(bundle.clone()), Value(supplier.clone()))) {
-                        // Only True authenticates; any other result is a failed authentication,
-                        // as TypeScript's `!== true`.
-                        Ok(result) => result.bind(py).extract::<bool>().unwrap_or(false),
-                        // Unwinds into the receiver's catch, which denies; no panic hook runs.
-                        Err(error) => resume_unwind(Box::new(format!("authentication adapter raised {error}"))),
+                        // Only the bool True authenticates; any other result is a failed
+                        // authentication, as TypeScript's `!== true`.
+                        Ok(result) => result.bind(py).cast::<PyBool>().is_ok_and(|result| result.is_true()),
+                        Err(error) => {
+                            let message = format!("authentication adapter raised {error}");
+                            if !error.is_instance_of::<PyException>(py) {
+                                INTERRUPT.with(|slot| *slot.borrow_mut() = Some(error));
+                            }
+                            // Unwinds into the receiver's catch, which denies; no panic hook runs.
+                            resume_unwind(Box::new(message))
+                        }
                     }
                 })
             };
-            Ok(Verifier(rs::Verifier::new(root.0, adapter)))
+            Ok(Verifier { receiver: rs::Verifier::new(root.0, callback), adapter: Some(adapter) })
         }
 
         /// A verifier with the built-in Archon adapter (`archon_authenticate`), which runs without
         /// calling back into Python.
         #[staticmethod]
         fn archon(root: Value) -> Self {
-            Verifier(rs::Verifier::new(root.0, rs::archon::authenticate))
+            Verifier { receiver: rs::Verifier::new(root.0, rs::archon::authenticate), adapter: None }
         }
 
         /// Checks `proof`, Ontos-encoded bytes, for exactly `query`. Any failure denies. The GIL
         /// is released while checking.
-        fn verify(&self, py: Python<'_>, query: &Query, proof: &[u8]) -> Decision {
+        fn verify(&self, py: Python<'_>, query: &Query, proof: &[u8]) -> PyResult<Decision> {
             let query = rs::Query {
                 actor: query.actor.0.clone(),
                 space: query.space.0.clone(),
                 statement: query.statement.0.clone(),
             };
-            let decision = py.detach(|| self.0.verify(&query, proof));
-            Decision {
+            let decision = py.detach(|| self.receiver.verify(&query, proof));
+            if let Some(interrupt) = INTERRUPT.with(|slot| slot.borrow_mut().take()) {
+                return Err(interrupt);
+            }
+            Ok(Decision {
                 permitted: decision.permitted,
                 code: decision.code,
                 detail: decision.detail,
                 checked_steps: decision.checked_steps,
+            })
+        }
+
+        fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+            if let Some(slot) = self.adapter.as_ref().and_then(|adapter| adapter.try_lock().ok()) {
+                if let Some(adapter) = slot.as_ref() {
+                    visit.call(adapter)?;
+                }
+            }
+            Ok(())
+        }
+
+        fn __clear__(&self) {
+            if let Some(mut slot) = self.adapter.as_ref().and_then(|adapter| adapter.lock().ok()) {
+                slot.take();
             }
         }
     }
@@ -249,12 +297,10 @@ mod thesmos {
     /// A space path of the segments' bytes (str segments as UTF-8), taken as given.
     #[pyfunction]
     #[pyo3(signature = (*segments))]
-    fn path(segments: Vec<Segment>) -> Value {
-        Value(rs::path(segments.into_iter().map(|segment| segment.0)))
+    fn path(segments: Vec<Bound<'_, PyAny>>) -> PyResult<Value> {
+        let segments = segments.iter().map(segment_bytes).collect::<PyResult<Vec<_>>>()?;
+        Ok(Value(rs::path(segments)))
     }
-
-    #[derive(FromPyObject)]
-    struct Segment(#[pyo3(from_py_with = segment_bytes)] Vec<u8>);
 
     fn segment_bytes(segment: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
         if let Ok(text) = segment.extract::<String>() {

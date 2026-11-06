@@ -194,3 +194,59 @@ def test_repr_is_bounded_for_deep_values():
     for _ in range(5_000):
         value = Value.tuple([value])
     assert repr(value).endswith("...)" + ")" * 63 + ")")
+
+
+class FakeNumpyBool:
+    # PyO3's bool extraction accepts numpy's bool by module and name; only a real bool may pass.
+    __module__ = "numpy"
+
+    def __bool__(self):
+        return True
+
+
+FakeNumpyBool.__name__ = FakeNumpyBool.__qualname__ = "bool_"
+
+
+def test_a_truthy_non_bool_does_not_authenticate():
+    root, query, proof = permitted_case()
+    decision = Verifier(root, lambda bundle, supplier: FakeNumpyBool()).verify(query, proof)
+    assert decision.code == RESULTS["authentication"], decision
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+def test_interrupts_propagate(interrupt):
+    root, query, proof = permitted_case()
+
+    def adapter(bundle, supplier):
+        raise interrupt()
+
+    with pytest.raises(interrupt):
+        Verifier(root, adapter).verify(query, proof)
+    # The next verification is unaffected.
+    assert Verifier(root, authenticate_example).verify(query, proof).permitted
+
+
+def test_a_service_holding_its_verifier_can_be_collected():
+    import gc
+    import weakref
+
+    root, query, proof = permitted_case()
+
+    class Service:
+        def __init__(self):
+            self.verifier = Verifier(root, self.authenticate)
+
+        def authenticate(self, bundle, supplier):
+            return authenticate_example(bundle, supplier)
+
+    service = Service()
+    assert service.verifier.verify(query, proof).permitted
+    gone = weakref.ref(service)
+    del service
+    gc.collect()
+    assert gone() is None
+
+
+def test_a_bad_path_segment_names_the_accepted_types():
+    with pytest.raises(TypeError, match="str or bytes"):
+        thesmos.path("team", 7)

@@ -62,8 +62,8 @@ which needs the same Logos access and OpenSSL 3 for the corpus's example keys. T
 The Python receiver in `core/py` is the Rust receiver behind PyO3, likewise with no
 receiver logic or law copy of its own. Keep `core/py/thesmos.pyi` in step with
 `core/py/src/lib.rs`. Build and test it in a virtual environment with
-`pip install maturin pytest cryptography`, `maturin develop --locked` and
-`pytest core/py/tests`, which needs the same Logos access. On a `windows-gnu` Rust
+`pip install maturin pytest cryptography`, then `maturin develop --locked` and
+`pytest tests` in `core/py`, which needs the same Logos access. On a `windows-gnu` Rust
 toolchain, PyO3 also needs MinGW's `dlltool` on `PATH`. The `python` job (Windows,
 Linux, macOS; CPython 3.10 and 3.13) uses the same token and the same warning, and
 never uploads a wheel, which would hold compiled Logos code.

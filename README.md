@@ -223,8 +223,9 @@ if not decision.permitted:
 It adds nothing to the Rust receiver, so it decides exactly as `core/rs` does. Values
 are `thesmos.Value`, canonical Ontos values with `encode()` and `Value.decode(...)`,
 built with `thesmos.path`, `fact`, `symbol`, `list` and `authorization`.
-`Verifier(root, authenticate)` takes your own adapter: only `True` authenticates, and an
-exception or a non-bool result denies the proof as invalid. `Verifier.archon(root)` uses
+`Verifier(root, authenticate)` takes your own adapter: only the bool `True`
+authenticates, any other result is `authentication-failed`, and an exception it raises
+is `invalid-proof`, as in every receiver; KeyboardInterrupt and SystemExit propagate. `Verifier.archon(root)` uses
 the built-in Archon adapter without calling back into Python. Verification releases the
 GIL. Its tests run `law/conformance.ontos` and the TypeScript-signed Archon proof.
 
