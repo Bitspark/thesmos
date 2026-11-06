@@ -61,7 +61,8 @@ release_tree() {
 notes_title() {
   local first
   first=$(head -1 "$1")
-  [[ $first == "# $tag"* ]] || fail "docs/releases/$tag.md must start with '# $tag'"
+  first=${first%$'\r'}
+  [[ $first == "# $tag: "?* ]] || fail "docs/releases/$tag.md must start with '# $tag: <title>'"
   echo "${first#\# }"
 }
 
@@ -161,7 +162,8 @@ publish() {
     git -C "$tools" fetch -q "$remote" "$commit"
     git -C "$tools" show "$commit:docs/releases/$tag.md" > "$scratch/notes.md" || fail "$commit has no docs/releases/$tag.md"
     title=$(notes_title "$scratch/notes.md")
-    tail -n +2 "$scratch/notes.md" > "$scratch/body.md"
+    # The notes after the title line, without the blank lines that separate them from it.
+    awk 'NR > 1 && (body || NF) { body = 1; print }' "$scratch/notes.md" > "$scratch/body.md"
     [[ $version == *-* ]] && prerelease=(--prerelease)
   fi
   if [ "$dry" = --dry-run ]; then
