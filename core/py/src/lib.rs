@@ -166,7 +166,8 @@ mod thesmos {
 
     thread_local! {
         // A KeyboardInterrupt or SystemExit raised in an adapter. The receiver denies as usual,
-        // then `verify` raises it again rather than swallowing it.
+        // then `verify` raises it again rather than swallowing it. This relies on core/rs calling
+        // the adapter synchronously on the thread that called verify, which `py.detach` keeps.
         static INTERRUPT: RefCell<Option<PyErr>> = const { RefCell::new(None) };
     }
 
@@ -258,9 +259,10 @@ mod thesmos {
         }
 
         fn __clear__(&self) {
-            if let Some(mut slot) = self.adapter.as_ref().and_then(|adapter| adapter.lock().ok()) {
-                slot.take();
-            }
+            // Release the lock before the adapter is dropped: dropping it can run Python code
+            // (`__del__`, a weakref callback) that calls verify, which takes the same lock.
+            let taken = self.adapter.as_ref().and_then(|adapter| adapter.lock().ok()).and_then(|mut slot| slot.take());
+            drop(taken);
         }
     }
 

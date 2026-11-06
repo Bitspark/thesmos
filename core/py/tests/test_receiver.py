@@ -250,3 +250,29 @@ def test_a_service_holding_its_verifier_can_be_collected():
 def test_a_bad_path_segment_names_the_accepted_types():
     with pytest.raises(TypeError, match="str or bytes"):
         thesmos.path("team", 7)
+
+
+def test_a_finaliser_may_verify_during_collection():
+    # CPython finalises a garbage cycle before clearing it (PEP 442), so a finaliser that calls
+    # verify still finds the adapter and decides normally. __clear__ additionally releases the
+    # adapter slot's lock before dropping the adapter, so a drop that runs Python code calling
+    # verify cannot deadlock on it.
+    import gc
+
+    root, query, proof = permitted_case()
+    seen = []
+
+    class Service:
+        def __init__(self):
+            self.verifier = Verifier(root, self.authenticate)
+
+        def authenticate(self, bundle, supplier):
+            return authenticate_example(bundle, supplier)
+
+        def __del__(self):
+            seen.append(self.verifier.verify(query, proof).code)
+
+    service = Service()
+    del service
+    gc.collect()
+    assert seen == [RESULTS["permitted"]]
