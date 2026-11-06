@@ -23,13 +23,14 @@ for (const file of walk(process.cwd())) {
     count++;
   }
   // A link to a line names what is there. When its text is code, the line must still hold the
-  // text's last segment (`Verifier::verify` -> `verify`), so a line that moved fails here
-  // instead of silently pointing at other code.
+  // text's last segment as a whole word (`Verifier::verify` -> `verify`), so a line that moved
+  // fails here instead of silently pointing at other code.
   for (const match of source.matchAll(/\[`([^`\]]+)`\]\(([^)#]+)#L(\d+)(?:-L\d+)?\)/g)) {
     if (/^[a-z]+:/i.test(match[2])) continue;
     const name = match[1].split(/::|\./).filter(Boolean).at(-1);
     const text = lines(resolve(dirname(file), decodeURIComponent(match[2])))[Number(match[3]) - 1];
-    assert(text.includes(name), `${file}: ${match[2]}#L${match[3]} no longer holds ${name}: ${text.trim()}`);
+    const word = new RegExp(`(?<!\\w)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\w)`);
+    assert(word.test(text), `${file}: ${match[2]}#L${match[3]} no longer holds ${name}: ${text.trim()}`);
     anchored++;
   }
 }
