@@ -27,6 +27,10 @@ default = ["archon"]
 # The Archon adapter (thesmos::archon). Without it, supply your own Authenticate.
 archon = ["dep:archon-core"]
 
+[[example]]
+name = "differential"
+required-features = ["archon"]
+
 [dev-dependencies]
 ontos-data = { package = "bitspark-ontos-data", version = "=0.13.0" }
 sha2 = "0.10"

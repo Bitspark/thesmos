@@ -331,3 +331,92 @@ jobs:
           python -m maturin build --release --locked --offline --out dist
           python -m pip install --no-index --find-links dist bitspark-thesmos
           python -m pytest -q tests
+  differential:
+    # Every receiver decides the same generated inputs (the frozen corpus, the Archon vector and
+    # seeded mutations of both), and permitted, code and checked steps must agree on each:
+    # scripts/differential. C/C++ binds core/rs and is covered through it. Like the receiver
+    # jobs it needs the read-only LOGOS_SOURCE_READ_TOKEN; without it this job says so. The
+    # token reaches only the three fetch commands. Node, npm and Python tools are set up after
+    # them (npm ci and pip reach public registries), and the builds and the comparison run
+    # offline.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GOPRIVATE: github.com/Bitspark/logos
+      GOFLAGS: -mod=readonly
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      CARGO_TERM_COLOR: never
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go/go.mod
+          # No module cache: it would hold the private Logos source, and caches reach other runs.
+          cache: false
+      - run: rustup toolchain install && rustup show active-toolchain
+        working-directory: core/rs
+      - name: Read access to the private Logos sources
+        id: access
+        run: |
+          if [ -z "$LOGOS_SOURCE_READ_TOKEN" ]; then
+            echo "::warning title=Differential not run::LOGOS_SOURCE_READ_TOKEN is not configured, so this run did not compare the receivers."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+      - name: Fetch the locked sources
+        if: steps.access.outputs.ready == 'true'
+        run: |
+          (cd core/go && go mod download)
+          (cd core/rs && cargo fetch --locked)
+          (cd core/py && cargo fetch --locked)
+          if grep -rqF -- "$LOGOS_SOURCE_READ_TOKEN" "$HOME/.gitconfig" "${CARGO_HOME:-$HOME/.cargo}" "$(go env GOMODCACHE)" 2>/dev/null; then
+            echo "::error::the Logos token reached a file during the fetch"
+            exit 1
+          fi
+        env:
+          LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.LOGOS_SOURCE_READ_TOKEN }}@github.com/Bitspark/logos.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/Bitspark/logos
+      - if: steps.access.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@bitspark'
+      - if: steps.access.outputs.ready == 'true'
+        run: npm ci --ignore-scripts --allow-remote=all
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGE_READ_TOKEN }}
+      - if: steps.access.outputs.ready == 'true'
+        run: npm run build
+      - if: steps.access.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - if: steps.access.outputs.ready == 'true'
+        working-directory: core/py
+        env:
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          python -m pip install maturin==1.15.0 cryptography==49.0.0
+          python -m maturin build --release --locked --offline --out dist
+          python -m pip install --no-index --find-links dist bitspark-thesmos
+      # A fixed seed for a stable baseline, and the run's own seed to explore new inputs; a
+      # failure prints the seed, so `--seed <n>` reproduces it locally.
+      - if: steps.access.outputs.ready == 'true'
+        env:
+          GOPROXY: 'off'
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          node scripts/differential/run.mjs --seed 1 --count 1500
+          node scripts/differential/run.mjs --seed ${{ github.run_id }} --count 1500

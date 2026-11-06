@@ -68,9 +68,18 @@ toolchain, PyO3 also needs MinGW's `dlltool` on `PATH`. The `python` job (Window
 Linux, macOS; CPython 3.10 and 3.13) uses the same token and the same warning, and
 never uploads a wheel, which would hold compiled Logos code.
 
-A release cites one qualifying run in which the `go`, `rust`, `cpp` and `python`
-jobs' tests ran on the release commit, or on a commit whose `core/` tree is identical
-(`git diff <that> <release> -- core` is empty).
+The receivers must decide alike. `node scripts/differential/run.mjs` (after
+`npm run build`, with Go, Rust and the installed Python extension) feeds every
+receiver the frozen corpus, the Archon vector and seeded mutations of both, and fails
+unless TypeScript, Go, Rust and Python agree on permitted, code and checked steps for
+each input; `--seed <n>` reproduces a CI run and `--langs ts,go,rs` narrows it. C/C++
+binds `core/rs`, so its decisions follow Rust's; its C ABI layer is tested by `ctest`, not
+by this comparison. The `differential` CI job runs it with a fixed
+seed and with the run's own seed.
+
+A release cites one qualifying run in which the `go`, `rust`, `cpp`, `python` and
+`differential` jobs' tests ran on the release commit, or on a commit whose `core/` tree
+is identical (`git diff <that> <release> -- core` is empty).
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read
