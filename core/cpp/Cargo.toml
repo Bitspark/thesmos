@@ -1,0 +1,27 @@
+[package]
+name = "bitspark-thesmos-capi"
+version = "1.0.0-preview.5"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/Bitspark/thesmos"
+description = "The C interface of the Rust Spaces receiver, for the C++ binding (include/thesmos/thesmos.hpp)."
+publish = false
+
+# The C and C++ receivers are this library: the Rust receiver (core/rs) behind a C ABI. It adds
+# no authority rule, decoding or checking of its own; every decision is core/rs's, made by
+# Logos's Rust checker.
+[lib]
+name = "thesmos_capi"
+path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+thesmos = { package = "bitspark-thesmos", path = "../rs" }
+ontos-core = { package = "bitspark-ontos-core", version = "=0.13.0" }
+ontos-codec = { package = "bitspark-ontos-codec", version = "=0.13.0" }
+ontos-data = { package = "bitspark-ontos-data", version = "=0.13.0" }
+
+[profile.release]
+# A panic never crosses the C boundary: every entry point catches it. Unwinding is required.
+panic = "unwind"

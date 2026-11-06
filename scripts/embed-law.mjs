@@ -63,7 +63,7 @@ for (const [language, files] of Object.entries(copies)) {
     // The crates are released with the npm package's version, under the same tag. Copying
     // cannot fix a version, so this is reported separately.
     const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    const manifests = ["core/rs/Cargo.toml"];
+    const manifests = ["core/rs/Cargo.toml", "core/cpp/Cargo.toml"];
     const wrong = manifests.filter(manifest =>
       readFileSync(new URL(`../${manifest}`, import.meta.url), "utf8").match(/^version = "([^"]+)"/m)?.[1] !== version);
     if (wrong.length) throw new Error(`${wrong.join(", ")} must carry package.json's version ${version}`);
