@@ -26,6 +26,7 @@ for (const [i, entry] of file.at(2).items().entries()) {
   const authenticate = authenticators[new TextDecoder().decode(auth.bytes())];
   const d = createSpacesVerifier({ root: caseRoot, authenticate })
     .verify({ query: { actor: q.at(0), space: q.at(1), statement: q.at(2) }, proof: proof.bytes() });
-  lines.push(JSON.stringify({ i, permitted: d.permitted, code: d.code, steps: d.permitted ? d.checkedSteps : 0 }));
+  // TypeScript has no panics: every thrown error is a decision (invalid-proof), as specified.
+  lines.push(JSON.stringify({ i, permitted: d.permitted, code: d.code, steps: d.permitted ? d.checkedSteps : 0, panicked: false }));
 }
 process.stdout.write(lines.join("\n") + "\n");

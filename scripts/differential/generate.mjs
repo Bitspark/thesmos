@@ -14,6 +14,9 @@ import { decode, encode } from "@bitspark/ontos-codec";
 const root = new URL("../../", import.meta.url);
 const { protocol } = await import(new URL("dist/core/ts/src/data.js", root));
 const { decodeCases } = await import(new URL("dist/core/ts/test/fixtures/conformance-format.js", root));
+const { ProofBuilder } = await import(new URL("dist/core/ts/test/recipes.js", root));
+const { delegatedGrant, ROOT, rootGrant } = await import(new URL("dist/core/ts/test/fixtures/proofs.js", root));
+const { atom, path } = await import(new URL("dist/core/ts/src/index.js", root));
 
 const [out, seedText = "1", countText = "1500"] = process.argv.slice(2);
 if (!out) throw new Error("usage: generate.mjs <out-dir> [seed] [mutations]");
@@ -64,7 +67,7 @@ const mutations = {
   "drop-bundle": b => { const p = parts(b.proof), list = bundlesOf(p); list.splice(int(list.length), 1); return { proof: withBundles(p, list) }; },
   "dup-bundle": b => { const p = parts(b.proof), list = bundlesOf(p); list.splice(int(list.length + 1), 0, pick(list)); return { proof: withBundles(p, list) }; },
   "swap-bundles": b => { const p = parts(b.proof), list = bundlesOf(p); const i = int(list.length), j = int(list.length); [list[i], list[j]] = [list[j], list[i]]; return { proof: withBundles(p, list) }; },
-  "splice-bundle": b => { const p = parts(b.proof), list = bundlesOf(p), other = bundlesOf(parts(pick(bases).proof)); list[int(list.length)] = pick(other); return { proof: withBundles(p, list) }; },
+  "splice-bundle": b => { const p = parts(b.proof), list = bundlesOf(p), other = bundlesOf(parts(pick(withSomeBundles).proof)); list[int(list.length)] = pick(other); return { proof: withBundles(p, list) }; },
   "payload-flip": b => { const p = parts(b.proof), list = bundlesOf(p), i = int(list.length); list[i] = new Tuple([new Atom(flip(list[i].at(0).bytes())), list[i].at(1)]); return { proof: withBundles(p, list), auth: "accept" }; },
   "payload-edit": b => {
     const p = parts(b.proof), list = bundlesOf(p), i = int(list.length), facts = spaceFacts(list[i].at(0).bytes());
@@ -91,13 +94,13 @@ const mutations = {
     query[field] = pick([other[field], symbol("x"), new Tuple([])]);
     return { query };
   },
-  "root": () => ({ root: pick(bases).root }),
+  "root": b => ({ root: pick([symbol("another-root"), ...bases.map(c => c.root).filter(r => !r.equals(b.root))]) }),
 };
 
 // Values on each limit, and one past it: the receivers must agree on both sides of every bound.
 function boundaries() {
   const cases = [], base = bases.find(b => b.auth === "example" && b.proof.length > 2000) ?? bases[0];
-  const p = parts(base.proof), { maxProofBytes, maxWireDepth, maxProofSteps, maxTermDepth } = protocol.limits;
+  const p = parts(base.proof), { maxProofBytes, maxWireDepth, maxProofSteps, maxProofDepth, maxTermDepth } = protocol.limits;
   for (const extra of [0, 1]) {
     // Proof bytes: pad one bundle's authentication until the envelope is exactly at, or one over, the limit.
     let pad = maxProofBytes - base.proof.length, proof;
@@ -108,6 +111,7 @@ function boundaries() {
       if (delta === 0) break;
       pad += delta;
     }
+    if (proof.length !== maxProofBytes + extra) throw new Error(`padding reached ${proof.length} bytes, not ${maxProofBytes + extra}`);
     cases.push({ kind: `proof-bytes-${extra ? "over" : "at"}`, ...base, proof, auth: "accept" });
     // Wire depth: nesting inside an authentication value, at and one past the decoder's bound.
     const list = bundlesOf(p); list[0] = new Tuple([list[0].at(0), nested(maxWireDepth - 3 + extra)]);
@@ -121,6 +125,16 @@ function boundaries() {
     const filled = n => { const c = []; while (c.length < n) c.push(clauses[c.length % clauses.length]); return new Atom(encode(new Tuple([...facts.slice(0, 4), new Tuple(c)]))); };
     const bundles = [new Tuple([filled(half), symbol("unsigned")]), new Tuple([filled(maxProofSteps + extra - half), symbol("unsigned")])];
     cases.push({ kind: `clauses-${extra ? "over" : "at"}`, ...base, proof: withBundles(p, bundles), auth: "accept" });
+    // Derivation depth: a valid delegation chain (each hop adds 3 to the depth, from 4) that
+    // reaches exactly the checker's depth bound, and one hop more; an invalid chain would be
+    // rejected at its first node, before its depth counts.
+    {
+      const hops = (maxProofDepth - 4) / 3 + extra, chain = new ProofBuilder(), read = atom("read"), deep = path("deep"), who = k => atom(`p${k}`);
+      if (!Number.isInteger(hops)) throw new Error("the depth bound is not reachable by whole hops");
+      let held = rootGrant(chain, chain.anchor(ROOT), who(0), read, deep);
+      for (let k = 1; k <= hops; k++) held = delegatedGrant(chain, held, who(k - 1), who(k), read, deep, deep);
+      cases.push({ kind: `proof-depth-${extra ? "over" : "at"}`, root: ROOT, query: { actor: who(hops), space: deep, statement: read }, proof: chain.finish(held), auth: "example" });
+    }
     // Claim term depth: a statement nested to the checker's term bound, and one past it.
     cases.push({ kind: `term-depth-${extra ? "over" : "at"}`, ...base, query: { ...base.query, statement: nested(maxTermDepth - 1 + extra) } });
   }
@@ -133,15 +147,19 @@ for (const b of bases) {
   cases.push({ kind: `corpus-accept:${b.name}`, ...b, auth: "accept" });
 }
 cases.push(...boundaries());
-const kinds = Object.keys(mutations);
+const kinds = Object.keys(mutations), produced = Object.fromEntries(kinds.map(kind => [kind, 0]));
+const needsBundles = kind => /bundle|payload|authentication/.test(kind);
+const withSomeBundles = bases.filter(b => bundlesOf(parts(b.proof)).length > 0);
 for (let n = 0; n < count; n++) {
-  const base = pick(bases), kind = pick(kinds);
-  let edit;
-  try { edit = mutations[kind](base); } catch { continue; } // a recipe that does not apply to this base
+  const kind = pick(kinds), base = pick(needsBundles(kind) ? withSomeBundles : bases);
+  const edit = mutations[kind](base);
+  produced[kind]++;
   const auth = edit.auth ?? (random() < 0.3 ? "accept" : base.auth);
   cases.push({ kind: `${kind}:${base.name}`, root: edit.root ?? base.root, query: edit.query ?? base.query, proof: edit.proof ?? base.proof, auth });
 }
 
+const missing = kinds.filter(kind => count >= 10 * kinds.length && produced[kind] === 0);
+if (missing.length) throw new Error(`no cases for ${missing.join(", ")}`);
 const value = new Tuple([symbol("thesmos/differential/1"), new Atom(new TextEncoder().encode(String(seed))), new Tuple(cases.map(c =>
   new Tuple([c.root, new Tuple([c.query.actor, c.query.space, c.query.statement]), new Atom(c.proof), symbol(c.auth)])))]);
 mkdirSync(out, { recursive: true });

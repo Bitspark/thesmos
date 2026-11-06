@@ -37,6 +37,8 @@ const decisions = {};
 for (const lang of langs) {
   const lines = deciders[lang]().trim().split("\n").map(line => JSON.parse(line));
   if (lines.length !== kinds.length || lines.some((d, i) => d.i !== i)) throw new Error(`${lang}: ${lines.length} decisions for ${kinds.length} cases`);
+  const panics = lines.filter(d => d.panicked);
+  if (panics.length) throw new Error(`${lang} panicked on ${panics.length} cases, first ${kinds[panics[0].i]} (case ${panics[0].i})`);
   decisions[lang] = lines;
 }
 

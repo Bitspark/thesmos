@@ -73,7 +73,8 @@ The receivers must decide alike. `node scripts/differential/run.mjs` (after
 receiver the frozen corpus, the Archon vector and seeded mutations of both, and fails
 unless TypeScript, Go, Rust and Python agree on permitted, code and checked steps for
 each input; `--seed <n>` reproduces a CI run and `--langs ts,go,rs` narrows it. C/C++
-binds `core/rs` and is covered through it. The `differential` CI job runs it with a fixed
+binds `core/rs`, so its decisions follow Rust's; its C ABI layer is tested by `ctest`, not
+by this comparison. The `differential` CI job runs it with a fixed
 seed and with the run's own seed.
 
 A release cites one qualifying run in which the `go`, `rust`, `cpp`, `python` and

@@ -35,7 +35,8 @@ fn main() {
         };
         let d = verifier.verify(&query, fields[2].as_atom().unwrap().bytes());
         let steps = if d.permitted { d.checked_steps } else { 0 };
-        let line = serde_json::json!({ "i": i, "permitted": d.permitted, "code": d.code, "steps": steps });
+        let panicked = d.detail.starts_with("verification failed: ");
+        let line = serde_json::json!({ "i": i, "permitted": d.permitted, "code": d.code, "steps": steps, "panicked": panicked });
         writeln!(out, "{line}").unwrap();
     }
 }

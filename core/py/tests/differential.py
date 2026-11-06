@@ -43,7 +43,8 @@ def main() -> None:
         else:
             raise SystemExit(f"unknown authenticator {kind!r}")
         d = verifier.verify(Query(actor, space, statement), proof.bytes)
-        out.append(json.dumps({"i": i, "permitted": d.permitted, "code": d.code, "steps": d.checked_steps if d.permitted else 0}))
+        panicked = d.detail.startswith("verification failed: ")
+        out.append(json.dumps({"i": i, "permitted": d.permitted, "code": d.code, "steps": d.checked_steps if d.permitted else 0, "panicked": panicked}))
     sys.stdout.write("\n".join(out) + "\n")
 
 

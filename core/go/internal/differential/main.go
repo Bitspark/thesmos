@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	codec "github.com/bitspark/ontos/codec/go"
 	core "github.com/bitspark/ontos/core/go"
@@ -64,7 +65,8 @@ func main() {
 			Permitted bool   `json:"permitted"`
 			Code      string `json:"code"`
 			Steps     int    `json:"steps"`
-		}{i, d.Permitted, d.Code, steps})
+			Panicked  bool   `json:"panicked"`
+		}{i, d.Permitted, d.Code, steps, strings.HasPrefix(d.Detail, "verification failed: ")})
 		fmt.Fprintln(out, string(line))
 	}
 }

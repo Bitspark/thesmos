@@ -336,8 +336,9 @@ jobs:
     # seeded mutations of both), and permitted, code and checked steps must agree on each:
     # scripts/differential. C/C++ binds core/rs and is covered through it. Like the receiver
     # jobs it needs the read-only LOGOS_SOURCE_READ_TOKEN; without it this job says so. The
-    # token reaches only the three fetch commands; Node, npm and Python tools are set up after
-    # them, and everything after the fetch runs offline.
+    # token reaches only the three fetch commands. Node, npm and Python tools are set up after
+    # them (npm ci and pip reach public registries), and the builds and the comparison run
+    # offline.
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
     runs-on: ubuntu-latest
     permissions:
@@ -393,9 +394,11 @@ jobs:
           registry-url: 'https://npm.pkg.github.com'
           scope: '@bitspark'
       - if: steps.access.outputs.ready == 'true'
-        run: npm ci --ignore-scripts --allow-remote=all && npm run build
+        run: npm ci --ignore-scripts --allow-remote=all
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGE_READ_TOKEN }}
+      - if: steps.access.outputs.ready == 'true'
+        run: npm run build
       - if: steps.access.outputs.ready == 'true'
         uses: actions/setup-python@v5
         with:
