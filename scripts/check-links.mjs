@@ -9,14 +9,28 @@ function walk(dir) {
     return entry.isDirectory() ? walk(path) : entry.name.endsWith(".md") ? [path] : [];
   });
 }
-let count = 0;
+const lines = path => readFileSync(path, "utf8").split("\n");
+let count = 0, anchored = 0;
 for (const file of walk(process.cwd())) {
   const source = readFileSync(file, "utf8");
   for (const match of source.matchAll(/\]\(([^)]+)\)/g)) {
-    const target = match[1].split("#")[0];
+    const [target, anchor = ""] = match[1].split("#");
     if (!target || /^[a-z]+:/i.test(target)) continue;
-    assert(existsSync(resolve(dirname(file), decodeURIComponent(target))), `${file}: broken link ${target}`);
+    const path = resolve(dirname(file), decodeURIComponent(target));
+    assert(existsSync(path), `${file}: broken link ${target}`);
+    const line = /^L(\d+)(?:-L\d+)?$/.exec(anchor);
+    assert(!line || lines(path)[Number(line[1]) - 1] !== undefined, `${file}: ${target} has no line ${line?.[1]}`);
     count++;
   }
+  // A link to a line names what is there. When its text is code, the line must still hold the
+  // text's last segment (`Verifier::verify` -> `verify`), so a line that moved fails here
+  // instead of silently pointing at other code.
+  for (const match of source.matchAll(/\[`([^`\]]+)`\]\(([^)#]+)#L(\d+)(?:-L\d+)?\)/g)) {
+    if (/^[a-z]+:/i.test(match[2])) continue;
+    const name = match[1].split(/::|\./).filter(Boolean).at(-1);
+    const text = lines(resolve(dirname(file), decodeURIComponent(match[2])))[Number(match[3]) - 1];
+    assert(text.includes(name), `${file}: ${match[2]}#L${match[3]} no longer holds ${name}: ${text.trim()}`);
+    anchored++;
+  }
 }
-console.log(`${count} local Markdown links resolve.`);
+console.log(`${count} local Markdown links resolve; ${anchored} line links still hold the code they name.`);
