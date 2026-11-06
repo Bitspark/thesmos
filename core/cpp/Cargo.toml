@@ -2,7 +2,7 @@
 name = "bitspark-thesmos-capi"
 version = "1.0.0-preview.5"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.96"
 license = "Apache-2.0"
 repository = "https://github.com/Bitspark/thesmos"
 description = "The C interface of the Rust Spaces receiver, for the C++ binding (include/thesmos/thesmos.hpp)."

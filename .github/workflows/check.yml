@@ -187,7 +187,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cbindgen@0.29.4
+      # core/cpp/rust-toolchain.toml pins the same Rust as core/rs; install exactly it.
       - run: |
+          rustup toolchain install && rustup show active-toolchain
           cargo fmt --check
           cbindgen --quiet --config cbindgen.toml --output include/thesmos/thesmos.h src/lib.rs
           git diff --exit-code -- include
@@ -215,6 +217,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       # No cargo cache: it would hold the private Logos source, and caches reach other runs.
+      # core/cpp/rust-toolchain.toml pins the same Rust as core/rs; install exactly it.
+      - run: rustup toolchain install && rustup show active-toolchain
       - name: Read access to the private Logos crate
         id: access
         run: |
