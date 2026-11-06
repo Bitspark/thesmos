@@ -108,13 +108,28 @@ def test_another_query_root_or_authentication_denies():
 @pytest.mark.parametrize(
     "adapter",
     [
-        pytest.param(lambda bundle, supplier: 1 / 0, id="raises"),
+        pytest.param(lambda bundle, supplier: False, id="returns-false"),
+        pytest.param(lambda bundle, supplier: None, id="returns-none"),
         pytest.param(lambda bundle, supplier: 1, id="returns-int"),
         pytest.param(lambda bundle, supplier: "yes", id="returns-str"),
+    ],
+)
+def test_only_true_authenticates(adapter):
+    # As in TypeScript (`!== true`): any result but True is a failed authentication.
+    root, query, proof = permitted_case()
+    decision = Verifier(root, adapter).verify(query, proof)
+    assert not decision.permitted and decision.code == RESULTS["authentication"], decision
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    [
+        pytest.param(lambda bundle, supplier: 1 / 0, id="raises"),
         pytest.param(lambda bundle: True, id="wrong-arity"),
     ],
 )
-def test_only_true_authenticates_and_adapter_failures_deny_as_invalid(adapter):
+def test_an_adapter_failure_denies_as_invalid(adapter):
+    # As in every receiver: an adapter that fails rather than answering is invalid-proof.
     root, query, proof = permitted_case()
     decision = Verifier(root, adapter).verify(query, proof)
     assert not decision.permitted and decision.code == RESULTS["invalid"], decision
@@ -172,3 +187,10 @@ def test_values_and_constructors():
     assert hash(Value.atom(b"a")) == hash(Value.atom(b"a"))
     with pytest.raises(ValueError):
         Value.decode(b"\xff")
+
+
+def test_repr_is_bounded_for_deep_values():
+    value = Value.atom(b"x")
+    for _ in range(5_000):
+        value = Value.tuple([value])
+    assert repr(value).endswith("...)" + ")" * 63 + ")")

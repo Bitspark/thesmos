@@ -66,7 +66,11 @@ mod thesmos {
         }
 
         fn __repr__(&self) -> String {
-            fn show(value: &ontos_core::Value) -> String {
+            // Bounded: a value built in Python can nest deeper than the stack allows.
+            fn show(value: &ontos_core::Value, depth: usize) -> String {
+                if depth == 0 {
+                    return "...".into();
+                }
                 match value.as_atom() {
                     Some(atom) => match std::str::from_utf8(atom.bytes()) {
                         Ok(text) if text.chars().all(|c| !c.is_control()) => format!("{text:?}"),
@@ -74,11 +78,11 @@ mod thesmos {
                     },
                     None => {
                         let items = value.as_tuple().map(|tuple| tuple.items()).unwrap_or_default();
-                        format!("({})", items.iter().map(show).collect::<Vec<_>>().join(", "))
+                        format!("({})", items.iter().map(|item| show(item, depth - 1)).collect::<Vec<_>>().join(", "))
                     }
                 }
             }
-            format!("Value({})", show(&self.0))
+            format!("Value({})", show(&self.0, 64))
         }
     }
 
@@ -165,8 +169,8 @@ mod thesmos {
     impl Verifier {
         /// `authenticate(bundle, supplier) -> bool` reports whether `supplier` authenticated
         /// exactly `bundle.payload`; it establishes key identity only, never authority. Only
-        /// `True` authenticates. An exception it raises, or a non-bool result, denies the proof
-        /// as invalid.
+        /// `True` authenticates: any other result denies as `authentication-failed`, and an
+        /// exception it raises denies as `invalid-proof`, as in every receiver.
         #[new]
         fn new(root: Value, authenticate: Bound<'_, PyAny>) -> PyResult<Self> {
             if !authenticate.is_callable() {
@@ -175,11 +179,10 @@ mod thesmos {
             let authenticate = authenticate.unbind();
             let adapter = move |bundle: &rs::Bundle, supplier: &ontos_core::Value| -> bool {
                 Python::attach(|py| {
-                    let result = authenticate
-                        .call1(py, (Bundle(bundle.clone()), Value(supplier.clone())))
-                        .and_then(|result| result.bind(py).extract::<bool>());
-                    match result {
-                        Ok(authenticated) => authenticated,
+                    match authenticate.call1(py, (Bundle(bundle.clone()), Value(supplier.clone()))) {
+                        // Only True authenticates; any other result is a failed authentication,
+                        // as TypeScript's `!== true`.
+                        Ok(result) => result.bind(py).extract::<bool>().unwrap_or(false),
                         // Unwinds into the receiver's catch, which denies; no panic hook runs.
                         Err(error) => resume_unwind(Box::new(format!("authentication adapter raised {error}"))),
                     }

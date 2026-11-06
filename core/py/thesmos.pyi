@@ -70,7 +70,7 @@ class Verifier:
     """Checks supplied proofs under one configured root. No temporal policy, search, network or clock."""
 
     def __init__(self, root: Value, authenticate: Callable[[Bundle, Value], bool]) -> None:
-        """Only `True` authenticates; an exception or a non-bool result denies the proof as invalid."""
+        """Only `True` authenticates: any other result is authentication-failed; an exception, invalid-proof."""
     @staticmethod
     def archon(root: Value) -> Verifier:
         """A verifier with the built-in Archon adapter, which runs without calling back into Python."""
