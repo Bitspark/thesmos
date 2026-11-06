@@ -140,6 +140,36 @@ the same bytes. Go module versions are tagged `core/go/v<version>` with the same
 version as the npm package. The Logos module is private: set
 `GOPRIVATE=github.com/Bitspark/logos` and give git read access to that repository.
 
+### Rust receiver
+
+Rust programs verify the same proofs with the crate `bitspark-thesmos` (library
+`thesmos`) in `core/rs`, again with no Node runtime or WASM loader:
+
+```toml
+[dependencies]
+thesmos = { package = "bitspark-thesmos", git = "https://github.com/Bitspark/thesmos", tag = "v<version>" }
+```
+
+```rust
+use thesmos::{archon, Query, Verifier};
+
+let verifier = Verifier::new(configured_root, archon::authenticate);
+let decision = verifier.verify(&Query { actor, space, statement }, &caller_proof);
+if !decision.permitted {
+    return; // the service performs its operation only after acceptance
+}
+```
+
+It is the same receiver as the Go module: no search, no hand-written authority rule,
+and the decision left to Logos's Rust checker (`logos-contract` at tag `v0.24.0`),
+with Ontos 0.13.0 values and `bitspark-archon-core` 0.16.0. The Archon adapter is the
+default feature `archon`; with `default-features = false` you supply your own
+`Fn(&Bundle, &Value) -> bool + Send + Sync + 'static`. It needs Rust 1.96 or later.
+Its tests run `law/conformance.ontos` and the same TypeScript-signed Archon proof
+as Go, on Windows, Linux and macOS. `logos-contract` is not on crates.io and comes
+from the private Logos repository: give git read access to it and set
+`CARGO_NET_GIT_FETCH_WITH_CLI=true` to use your git credentials.
+
 Run `npm run build && npm run example`. The
 [document service](examples/document-service.ts) carries root → team → docs
 asserter outputs and Alice's grant to Bob. The receiver verifies the chain
@@ -173,6 +203,7 @@ measurement cases, not delegation limits.
 | --- | --- |
 | [law/](law/common-law.logos) | Frozen common law and compiled Ontos data; separate asserter template. Embedded into the library at build time, so the root, `/identity` and `/remote` read no files at runtime |
 | [core/go/](core/go/verifier.go) | Go receiver: the same verification over Logos's Go checker; `archon` authentication adapter; a committed byte copy of `law/` |
+| [core/rs/](core/rs/src/lib.rs) | Rust receiver: the same verification over Logos's Rust checker; `archon` feature; a committed byte copy of `law/` |
 | [core/ts/src/](core/ts/src/index.ts) | Local verifier; `/client` search; `/archon` authentication adapter; `/identity` issuer/subject profile; `/remote` proof-provider contract and HTTP adapter |
 | [conformance/](conformance/frozen.json) | Frozen artifact pins; original corpus is `law/conformance.ontos` |
 | [core/ts/test/](core/ts/test/sdk.test.ts) | Core, asserter, mutation and client tests |

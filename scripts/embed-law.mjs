@@ -21,10 +21,11 @@ writeFileSync(new URL("../core/ts/src/law.generated.ts", import.meta.url), [
 ].join("\n"));
 console.log("Embedded the frozen law in core/ts/src/law.generated.ts.");
 
-// The Go module (core/go) is fetched as source by `go get`, with no build step, so it carries a
-// committed byte copy of the same artifacts. `--check-go` (run by `npm run law:check`) fails if
-// that copy differs from law/; `--go` rewrites it. The law/ files stay the only source.
-const goCopies = {
+// The Go module (core/go) is fetched as source by `go get`, and the Rust crate (core/rs) as a git
+// dependency or vendored copy, with no build step, so each carries a committed byte copy of the
+// same artifacts. `--check-go` and `--check-rs` (run by `npm run law:check`) fail if a copy differs
+// from law/; `--go` and `--rs` rewrite it. The law/ files stay the only source.
+const copies = { go: {
   "core/go/law/common-law.ontos": "common-law.ontos",
   "core/go/law/assertion-template.ontos": "assertion-template.ontos",
   "core/go/law/space-asserter-template.ontos": "layers/space-asserter-template.ontos",
@@ -32,12 +33,23 @@ const goCopies = {
   "core/go/testdata/conformance.ontos": "conformance.ontos",
   "core/go/LICENSE": "../LICENSE",
   "core/go/NOTICE": "../NOTICE",
-};
-if (process.argv.includes("--go") || process.argv.includes("--check-go")) {
+}, rs: {
+  "core/rs/law/common-law.ontos": "common-law.ontos",
+  "core/rs/law/assertion-template.ontos": "assertion-template.ontos",
+  "core/rs/law/space-asserter-template.ontos": "layers/space-asserter-template.ontos",
+  "core/rs/law/protocol.json": "protocol.json",
+  "core/rs/tests/data/conformance.ontos": "conformance.ontos",
+  "core/rs/tests/data/archon-document.ontos": "../core/go/testdata/archon-document.ontos",
+  "core/rs/LICENSE": "../LICENSE",
+  "core/rs/NOTICE": "../NOTICE",
+} };
+for (const [language, files] of Object.entries(copies)) {
+  const write = process.argv.includes(`--${language}`);
+  if (!write && !process.argv.includes(`--check-${language}`)) continue;
   const stale = [];
-  for (const [target, source] of Object.entries(goCopies)) {
+  for (const [target, source] of Object.entries(files)) {
     const url = new URL(`../${target}`, import.meta.url);
-    if (process.argv.includes("--go")) {
+    if (write) {
       mkdirSync(new URL(".", url), { recursive: true });
       writeFileSync(url, law(source));
     } else {
@@ -46,6 +58,15 @@ if (process.argv.includes("--go") || process.argv.includes("--check-go")) {
       if (!current || !current.equals(law(source))) stale.push(target);
     }
   }
-  if (stale.length) throw new Error(`Go law copy differs from law/: ${stale.join(", ")}; run node scripts/embed-law.mjs --go`);
-  console.log(process.argv.includes("--go") ? "Copied the frozen law into core/go." : "The Go law copy equals law/.");
+  if (stale.length) throw new Error(`core/${language} law copy differs from law/: ${stale.join(", ")}; run node scripts/embed-law.mjs --${language}`);
+  if (language === "rs") {
+    // The crates are released with the npm package's version, under the same tag. Copying
+    // cannot fix a version, so this is reported separately.
+    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const manifests = ["core/rs/Cargo.toml"];
+    const wrong = manifests.filter(manifest =>
+      readFileSync(new URL(`../${manifest}`, import.meta.url), "utf8").match(/^version = "([^"]+)"/m)?.[1] !== version);
+    if (wrong.length) throw new Error(`${wrong.join(", ")} must carry package.json's version ${version}`);
+  }
+  console.log(write ? `Copied the frozen law into core/${language}.` : `The core/${language} law copy equals law/.`);
 }

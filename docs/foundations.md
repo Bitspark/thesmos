@@ -18,10 +18,11 @@ An application selecting Deixis keys can represent them directly as atoms.
 
 The public family separates semantic floors, codecs, optional adapters and
 language bindings. This repository follows that separation with actual
-implementations only, rather than placeholder packages: the TypeScript SDK, and a
-Go receiver (`core/go`) for Go services, built on the same foundations' Go cores
-(Logos contract, Ontos and archon at the pinned versions). Another language is
-added when a consumer needs it, held to the same corpus.
+implementations only, rather than placeholder packages: the TypeScript SDK, and Go
+(`core/go`) and Rust (`core/rs`) receivers, built on the same foundations' Go and
+Rust cores (Logos contract, Ontos and archon at the pinned versions). Another
+language is added when a consumer needs it, held to the same corpus. A language
+without a Logos checker binds an existing receiver instead of porting the checker.
 Ontos 0.13.0 is pinned to match the selected Logos 0.24.0 dependency cohort;
 the inspected Ontos main reports 0.14.0. Upgrading one side alone can produce
 incompatible JavaScript class identities even when the value semantics agree.
