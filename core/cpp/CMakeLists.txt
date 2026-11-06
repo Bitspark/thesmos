@@ -15,8 +15,8 @@ find_package(Corrosion 0.5 QUIET)
 if(NOT Corrosion_FOUND)
   FetchContent_Declare(Corrosion
     GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-    GIT_TAG v0.5.1
-    GIT_SHALLOW TRUE)
+    GIT_TAG a1a1aaa057a5da656c06c3d8505b767a4e941709  # v0.5.2, pinned by commit
+    )
   FetchContent_MakeAvailable(Corrosion)
 endif()
 
@@ -40,8 +40,9 @@ if(THESMOS_BUILD_TESTS)
   find_package(OpenSSL 3.0 REQUIRED)
   set(test_data "${CMAKE_CURRENT_SOURCE_DIR}/../rs/tests/data")
 
+  find_package(Threads REQUIRED)
   add_executable(thesmos_receiver_tests tests/receiver.cpp)
-  target_link_libraries(thesmos_receiver_tests PRIVATE thesmos::thesmos OpenSSL::Crypto)
+  target_link_libraries(thesmos_receiver_tests PRIVATE thesmos::thesmos OpenSSL::Crypto Threads::Threads)
   target_compile_definitions(thesmos_receiver_tests PRIVATE THESMOS_TEST_DATA="${test_data}")
   add_test(NAME receiver COMMAND thesmos_receiver_tests)
 

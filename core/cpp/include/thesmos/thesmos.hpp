@@ -27,15 +27,19 @@ namespace thesmos {
 using Bytes = std::vector<std::uint8_t>;
 
 namespace detail {
-inline Bytes take(thesmos_buffer& buffer) {
-  Bytes bytes(buffer.data, buffer.data + buffer.len);
-  thesmos_buffer_free(&buffer);
-  return bytes;
-}
-inline std::string take_text(thesmos_buffer& buffer) {
-  std::string text(reinterpret_cast<const char*>(buffer.data), buffer.len);
-  thesmos_buffer_free(&buffer);
-  return text;
+// Releases a buffer or decision from the C interface when it goes out of scope, so a copy that
+// throws (out of memory) does not leak it.
+struct BufferRelease {
+  thesmos_buffer& buffer;
+  ~BufferRelease() { thesmos_buffer_free(&buffer); }
+};
+struct DecisionRelease {
+  thesmos_decision& decision;
+  ~DecisionRelease() { thesmos_decision_free(&decision); }
+};
+inline Bytes bytes(const thesmos_buffer& buffer) { return Bytes(buffer.data, buffer.data + buffer.len); }
+inline std::string text(const thesmos_buffer& buffer) {
+  return std::string(reinterpret_cast<const char*>(buffer.data), buffer.len);
 }
 }  // namespace detail
 
@@ -83,10 +87,12 @@ class Value {
   Bytes encode() const {
     thesmos_buffer buffer{};
     if (!thesmos_value_encode(get(), &buffer)) throw std::invalid_argument("thesmos: invalid value");
-    return detail::take(buffer);
+    const detail::BufferRelease release{buffer};
+    return detail::bytes(buffer);
   }
+  // A moved-from value is neither; it may only be assigned to or destroyed.
   bool is_atom() const { return thesmos_value_is_atom(get()); }
-  bool is_tuple() const { return !is_atom(); }
+  bool is_tuple() const { return get() != nullptr && !is_atom(); }
   // An atom's bytes; throws for a tuple.
   Bytes bytes() const {
     if (!is_atom()) throw std::logic_error("thesmos: not an atom");
@@ -105,7 +111,8 @@ class Value {
   std::optional<std::string> read_text() const {
     thesmos_buffer buffer{};
     if (!thesmos_value_read_text(get(), &buffer)) return std::nullopt;
-    return detail::take_text(buffer);
+    const detail::BufferRelease release{buffer};
+    return detail::text(buffer);
   }
   std::optional<std::int64_t> read_int() const {
     std::int64_t n = 0;
@@ -133,6 +140,7 @@ class Value {
   };
   explicit Value(thesmos_value* handle) : handle_(handle) {}
   static thesmos_value* clone(const thesmos_value* handle) {
+    if (handle == nullptr) return nullptr;  // a copy of a moved-from value is moved-from
     thesmos_value* copy = thesmos_value_clone(handle);
     if (copy == nullptr) throw std::bad_alloc();
     return copy;
@@ -220,7 +228,12 @@ class Verifier {
   }
 
   Verifier(Verifier&&) noexcept = default;
-  Verifier& operator=(Verifier&&) noexcept = default;
+  // The old verifier is released before the adapter it calls, as in the destructor.
+  Verifier& operator=(Verifier&& other) noexcept {
+    handle_ = std::move(other.handle_);
+    authenticate_ = std::move(other.authenticate_);
+    return *this;
+  }
 
   // Checks proof, canonical Ontos bytes, for exactly query. Every failure denies.
   Decision verify(const Query& query, std::span<const std::uint8_t> proof) const {
@@ -229,9 +242,8 @@ class Verifier {
                         proof.size(), &out)) {
       throw std::invalid_argument("thesmos: invalid verifier or query");
     }
-    Decision decision{out.permitted, detail::take_text(out.code), detail::take_text(out.detail), out.checked_steps};
-    thesmos_decision_free(&out);
-    return decision;
+    const detail::DecisionRelease release{out};
+    return Decision{out.permitted, detail::text(out.code), detail::text(out.detail), out.checked_steps};
   }
 
  private:

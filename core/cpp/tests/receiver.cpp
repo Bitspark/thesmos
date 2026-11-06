@@ -9,6 +9,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #include "thesmos/thesmos.hpp"
 
@@ -131,6 +132,16 @@ void typescript_archon_proof_verifies() {
   CHECK(!thesmos::Verifier::archon(thesmos::Value::atom("another root")).verify(query, proof).permitted, "root");
   const thesmos::Query sibling{q[0], thesmos::path({"sibling"}), q[2]};
   CHECK(!verifier.verify(sibling, proof).permitted, "another space");
+  // One verifier, shared by several threads at once, decides each call the same way.
+  std::vector<int> permitted(8, 0);
+  std::vector<std::thread> threads;
+  for (std::size_t t = 0; t < permitted.size(); ++t) {
+    threads.emplace_back([&, t] {
+      for (int i = 0; i < 4; ++i) permitted[t] += verifier.verify(query, proof).permitted;
+    });
+  }
+  for (std::thread& thread : threads) thread.join();
+  for (int n : permitted) CHECK(n == 4, "a concurrent call denied: %d of 4", n);
 }
 
 void the_adapter_contract() {
@@ -160,6 +171,19 @@ void the_adapter_contract() {
     const thesmos::Decision got = verifier.verify(c.query, bytes);
     CHECK(!got.permitted && got.code == "invalid-proof", "malformed proof: %s", got.code.c_str());
   }
+}
+
+void moves_and_moved_from_values() {
+  // Replacing a verifier releases the old one before its adapter; the new one keeps working.
+  const thesmos::Value vector = thesmos::Value::decode(read_file("archon-document.ontos"));
+  const thesmos::Value q = vector[1];
+  thesmos::Verifier verifier(thesmos::Value::atom("old root"), authenticate_example);
+  verifier = thesmos::Verifier::archon(vector[0]);
+  CHECK(verifier.verify({q[0], q[1], q[2]}, vector[2].bytes()).permitted, "a moved-in verifier");
+  thesmos::Value moved = thesmos::symbol("x");
+  const thesmos::Value taken = std::move(moved);
+  const thesmos::Value copy = moved;  // NOLINT(bugprone-use-after-move): deliberate
+  CHECK(!copy.is_atom() && !copy.is_tuple() && taken.is_atom(), "a moved-from value is neither");
 }
 
 void values_round_trip() {
@@ -195,6 +219,7 @@ int main() {
     frozen_conformance_corpus();
     typescript_archon_proof_verifies();
     the_adapter_contract();
+    moves_and_moved_from_values();
     values_round_trip();
   } catch (const std::exception& error) {
     std::fprintf(stderr, "FAIL: %s\n", error.what());

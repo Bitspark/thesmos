@@ -54,7 +54,7 @@ The C and C++ receiver in `core/cpp` is the Rust receiver behind a C ABI: it has
 receiver logic or law copy of its own, so a receiver change reaches it through
 `core/rs`. After changing `core/cpp/src/lib.rs`, regenerate the committed header with
 `cbindgen --config cbindgen.toml --output include/thesmos/thesmos.h src/lib.rs` in
-`core/cpp` (cbindgen 0.29.4); the `cpp` CI job fails on any difference. Build and test
+`core/cpp` (cbindgen 0.29.4); the `cpp-header` CI job fails on any difference. Build and test
 with `cmake -S core/cpp -B build && cmake --build build && ctest --test-dir build`,
 which needs the same Logos access and OpenSSL 3 for the corpus's example keys. The
 `cpp` job (Linux, macOS) uses the same token and the same warning.

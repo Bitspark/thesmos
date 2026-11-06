@@ -153,7 +153,8 @@ void thesmos_verifier_free(struct thesmos_verifier *verifier);
 
 // Checks `proof` (canonical Ontos bytes) for exactly the query: may `actor` assert `statement`
 // in `space`? Writes the decision to `out` and returns true. Returns false, writing nothing, only
-// when an argument is null. Every failure of the proof is a decision that denies, including a panicking callback.
+// when an argument is null. Every failure of the proof is a decision that denies, including a
+// panicking callback.
 bool thesmos_verify(const struct thesmos_verifier *verifier,
                     const struct thesmos_value *actor,
                     const struct thesmos_value *space,

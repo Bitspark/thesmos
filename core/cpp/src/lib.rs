@@ -13,8 +13,9 @@
 //!   Values and verifiers are immutable, and may be read from several threads at once.
 //! - A byte range (`data`, `len`) is readable for `len` bytes; `data` may be null only if
 //!   `len` is 0. An array of value pointers is readable for `len` entries.
-//! - An out pointer is null or writable. A buffer or decision written to it is owned by the
-//!   caller until released with its `_free` function, exactly once.
+//! - An out pointer is null or writable; it need not be initialized, since results are written
+//!   without reading it. A buffer or decision written to it is owned by the caller until
+//!   released with its `_free` function, exactly once.
 //! - Borrowed bytes (`thesmos_bytes`) are valid only while the value they came from lives.
 #![allow(clippy::missing_safety_doc)]
 
@@ -182,9 +183,9 @@ pub unsafe extern "C" fn thesmos_value_decode(data: *const u8, len: usize) -> *m
 /// Writes the value's canonical Ontos bytes to `out`; false (and nothing written) on null input.
 #[no_mangle]
 pub unsafe extern "C" fn thesmos_value_encode(handle: *const ThesmosValue, out: *mut ThesmosBuffer) -> bool {
-    guard(false, || match (value(handle), out.as_mut()) {
-        (Some(value), Some(out)) => {
-            *out = buffer(&ontos_codec::encode(value));
+    guard(false, || match value(handle) {
+        Some(value) if !out.is_null() => {
+            out.write(buffer(&ontos_codec::encode(value)));
             true
         }
         _ => false,
@@ -239,9 +240,9 @@ pub unsafe extern "C" fn thesmos_value_tuple_item(handle: *const ThesmosValue, i
 /// Reads Ontos's text embedding into `out` as UTF-8; false if the value is not one.
 #[no_mangle]
 pub unsafe extern "C" fn thesmos_value_read_text(handle: *const ThesmosValue, out: *mut ThesmosBuffer) -> bool {
-    guard(false, || match (value(handle).and_then(|value| ontos_data::read_text(value).ok()), out.as_mut()) {
-        (Some(text), Some(out)) => {
-            *out = buffer(text.as_bytes());
+    guard(false, || match value(handle).and_then(|value| ontos_data::read_text(value).ok()) {
+        Some(text) if !out.is_null() => {
+            out.write(buffer(text.as_bytes()));
             true
         }
         _ => false,
@@ -253,9 +254,9 @@ pub unsafe extern "C" fn thesmos_value_read_text(handle: *const ThesmosValue, ou
 pub unsafe extern "C" fn thesmos_value_read_int(handle: *const ThesmosValue, out: *mut i64) -> bool {
     guard(false, || {
         let n = value(handle).and_then(|value| ontos_data::read_int(value).ok()).and_then(|n| i64::try_from(n).ok());
-        match (n, out.as_mut()) {
-            (Some(n), Some(out)) => {
-                *out = n;
+        match n {
+            Some(n) if !out.is_null() => {
+                out.write(n);
                 true
             }
             _ => false,
@@ -266,9 +267,9 @@ pub unsafe extern "C" fn thesmos_value_read_int(handle: *const ThesmosValue, out
 /// Reads Ontos's boolean embedding; false if the value is not one.
 #[no_mangle]
 pub unsafe extern "C" fn thesmos_value_read_bool(handle: *const ThesmosValue, out: *mut bool) -> bool {
-    guard(false, || match (value(handle).and_then(|value| ontos_data::read_bool(value).ok()), out.as_mut()) {
-        (Some(b), Some(out)) => {
-            *out = b;
+    guard(false, || match value(handle).and_then(|value| ontos_data::read_bool(value).ok()) {
+        Some(b) if !out.is_null() => {
+            out.write(b);
             true
         }
         _ => false,
@@ -422,7 +423,8 @@ pub unsafe extern "C" fn thesmos_verifier_free(verifier: *mut ThesmosVerifier) {
 
 /// Checks `proof` (canonical Ontos bytes) for exactly the query: may `actor` assert `statement`
 /// in `space`? Writes the decision to `out` and returns true. Returns false, writing nothing, only
-/// when an argument is null. Every failure of the proof is a decision that denies, including a panicking callback.
+/// when an argument is null. Every failure of the proof is a decision that denies, including a
+/// panicking callback.
 #[no_mangle]
 pub unsafe extern "C" fn thesmos_verify(
     verifier: *const ThesmosVerifier,
@@ -433,27 +435,33 @@ pub unsafe extern "C" fn thesmos_verify(
     proof_len: usize,
     out: *mut ThesmosDecision,
 ) -> bool {
-    let (Some(verifier), Some(actor), Some(space), Some(statement), Some(proof), Some(out)) =
-        (verifier.as_ref(), value(actor), value(space), value(statement), input(proof, proof_len), out.as_mut())
+    let (Some(verifier), Some(actor), Some(space), Some(statement), Some(proof)) =
+        (verifier.as_ref(), value(actor), value(space), value(statement), input(proof, proof_len))
     else {
         return false;
     };
-    *out = catch_unwind(AssertUnwindSafe(|| {
-        let query = thesmos::Query { actor: actor.clone(), space: space.clone(), statement: statement.clone() };
-        let decision = verifier.0.verify(&query, proof);
-        ThesmosDecision {
-            permitted: decision.permitted,
-            checked_steps: decision.checked_steps as u64,
-            code: buffer(decision.code.as_bytes()),
-            detail: buffer(decision.detail.as_bytes()),
-        }
-    }))
-    .unwrap_or_else(|_| ThesmosDecision {
-        permitted: false,
-        checked_steps: 0,
-        code: buffer(b"invalid-proof"),
-        detail: buffer(b"verification panicked"),
-    });
+    if out.is_null() {
+        return false;
+    }
+    // Written through the pointer: the caller's decision may be uninitialized.
+    out.write(
+        catch_unwind(AssertUnwindSafe(|| {
+            let query = thesmos::Query { actor: actor.clone(), space: space.clone(), statement: statement.clone() };
+            let decision = verifier.0.verify(&query, proof);
+            ThesmosDecision {
+                permitted: decision.permitted,
+                checked_steps: decision.checked_steps as u64,
+                code: buffer(decision.code.as_bytes()),
+                detail: buffer(decision.detail.as_bytes()),
+            }
+        }))
+        .unwrap_or_else(|_| ThesmosDecision {
+            permitted: false,
+            checked_steps: 0,
+            code: buffer(b"invalid-proof"),
+            detail: buffer(b"verification panicked"),
+        }),
+    );
     true
 }
 
