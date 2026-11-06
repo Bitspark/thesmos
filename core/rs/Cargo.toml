@@ -1,0 +1,33 @@
+[package]
+name = "bitspark-thesmos"
+version = "1.0.0-preview.5"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/Bitspark/thesmos"
+description = "The Spaces authority receiver: verify a supplied proof under the frozen law, with Logos's Rust checker."
+include = ["src/**", "law/**", "tests/**", "Cargo.toml", "LICENSE", "NOTICE", "README.md"]
+
+[lib]
+name = "thesmos"
+path = "src/lib.rs"
+
+# The same cohort as the npm package and the Go module: Logos 0.24.0, Ontos 0.13.0, archon 0.16.0.
+# logos-contract is not on crates.io; like the Go module and the npm package, it comes from the
+# private Bitspark/logos repository, here by its release tag.
+[dependencies]
+logos-contract = { git = "https://github.com/Bitspark/logos", tag = "v0.24.0" }
+ontos-core = { package = "bitspark-ontos-core", version = "=0.13.0" }
+ontos-codec = { package = "bitspark-ontos-codec", version = "=0.13.0" }
+serde_json = "1"
+archon-core = { package = "bitspark-archon-core", version = "=0.16.0", optional = true }
+
+[features]
+default = ["archon"]
+# The Archon adapter (thesmos::archon). Without it, supply your own Authenticate.
+archon = ["dep:archon-core"]
+
+[dev-dependencies]
+ontos-data = { package = "bitspark-ontos-data", version = "=0.13.0" }
+sha2 = "0.10"
+archon-core = { package = "bitspark-archon-core", version = "=0.16.0" }
