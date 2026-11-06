@@ -117,3 +117,44 @@ jobs:
           LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
       - if: steps.access.outputs.ready == 'true'
         run: go vet ./... && go test -v ./... && go mod verify
+  rust:
+    # The Rust receiver (core/rs), Windows first as its first consumer needs, then Linux and
+    # macOS. logos-contract comes from the private Logos repository by tag, through the same
+    # read-only LOGOS_SOURCE_READ_TOKEN as the Go job; without it this job only checks
+    # formatting and says so. A release needs a run in which these tests ran.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: core/rs
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # No cargo cache: it would hold the private Logos source, and caches reach other runs.
+      - run: rustup show active-toolchain && cargo fmt --check
+      - name: Read access to the private Logos crate
+        id: access
+        run: |
+          if [ -z "$LOGOS_SOURCE_READ_TOKEN" ]; then
+            echo "::warning title=Rust receiver not tested::LOGOS_SOURCE_READ_TOKEN is not configured, so this run did not build or test core/rs."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config --global url."https://x-access-token:${LOGOS_SOURCE_READ_TOKEN}@github.com/Bitspark/logos".insteadOf "https://github.com/Bitspark/logos"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+        env:
+          LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+      - if: steps.access.outputs.ready == 'true'
+        run: |
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --no-fail-fast
+          cargo build --locked --no-default-features

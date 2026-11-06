@@ -58,6 +58,12 @@ for (const [language, files] of Object.entries(copies)) {
       if (!current || !current.equals(law(source))) stale.push(target);
     }
   }
+  if (language === "rs") {
+    // The crate is released with the npm package's version, under the same tag.
+    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const crate = readFileSync(new URL("../core/rs/Cargo.toml", import.meta.url), "utf8").match(/^version = "([^"]+)"/m)?.[1];
+    if (crate !== version) stale.push(`core/rs/Cargo.toml version ${crate}, package.json ${version}`);
+  }
   if (stale.length) throw new Error(`core/${language} law copy differs from law/: ${stale.join(", ")}; run node scripts/embed-law.mjs --${language}`);
   console.log(write ? `Copied the frozen law into core/${language}.` : `The core/${language} law copy equals law/.`);
 }

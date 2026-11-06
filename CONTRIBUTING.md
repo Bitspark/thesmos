@@ -41,6 +41,14 @@ and the shared Archon vector (`scripts/export-archon-vector.mjs`). Run
 `go` job tests only when the service desk has issued its read-only
 `LOGOS_SOURCE_READ_TOKEN`, and otherwise warns that Go was not tested. A release
 needs a qualifying run in which that job's tests ran.
+
+The Rust receiver in `core/rs` carries its own byte copy for the same reason: a git
+or vendored crate holds only its directory (`node scripts/embed-law.mjs --rs`, checked
+by `npm run law:check`). It follows the same rule: a receiver change lands in
+TypeScript, Go and Rust, and all three pass the corpus and the Archon vector. Run
+`cargo test` in `core/rs` with `CARGO_NET_GIT_FETCH_WITH_CLI=true` and git read
+access to Bitspark/logos. The `rust` CI job (Windows, Linux, macOS) uses the same
+token and the same warning.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read
