@@ -124,7 +124,9 @@ jobs:
       - if: steps.access.outputs.ready == 'true'
         run: go vet ./... && go test -v ./... && go mod verify
         env:
+          # GOPROXY=off alone would still fetch GOPRIVATE modules from git.
           GOPROXY: 'off'
+          GONOPROXY: none
   rust:
     # The Rust receiver (core/rs), Windows first as its first consumer needs, then Linux and
     # macOS. logos-contract comes from the private Logos repository by tag, through the same
@@ -334,11 +336,11 @@ jobs:
   differential:
     # Every receiver decides the same generated inputs (the frozen corpus, the Archon vector and
     # seeded mutations of both), and permitted, code and checked steps must agree on each:
-    # scripts/differential. C/C++ binds core/rs and is covered through it. Like the receiver
-    # jobs it needs the read-only LOGOS_SOURCE_READ_TOKEN; without it this job says so. The
-    # token reaches only the three fetch commands. Node, npm and Python tools are set up after
-    # them (npm ci and pip reach public registries), and the builds and the comparison run
-    # offline.
+    # scripts/differential. C++ decides through its C interface (core/cpp's
+    # thesmos_differential). Like the receiver jobs it needs the read-only
+    # LOGOS_SOURCE_READ_TOKEN; without it this job says so. The token reaches only the fetch
+    # commands. Node, npm and Python tools are set up after them (npm ci and pip reach public
+    # registries, CMake fetches Corrosion), and the builds and the comparison run offline.
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
     runs-on: ubuntu-latest
     permissions:
@@ -378,6 +380,7 @@ jobs:
           (cd core/go && go mod download)
           (cd core/rs && cargo fetch --locked)
           (cd core/py && cargo fetch --locked)
+          (cd core/cpp && cargo fetch --locked)
           if grep -rqF -- "$LOGOS_SOURCE_READ_TOKEN" "$HOME/.gitconfig" "${CARGO_HOME:-$HOME/.cargo}" "$(go env GOMODCACHE)" 2>/dev/null; then
             echo "::error::the Logos token reached a file during the fetch"
             exit 1
@@ -411,12 +414,83 @@ jobs:
           python -m pip install maturin==1.15.0 cryptography==49.0.0
           python -m maturin build --release --locked --offline --out dist
           python -m pip install --no-index --find-links dist bitspark-thesmos
+      - if: steps.access.outputs.ready == 'true'
+        working-directory: core/cpp
+        env:
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --target thesmos_differential
       # A fixed seed for a stable baseline, and the run's own seed to explore new inputs; a
       # failure prints the seed, so `--seed <n>` reproduces it locally.
       - if: steps.access.outputs.ready == 'true'
         env:
           GOPROXY: 'off'
+          GONOPROXY: none
           CARGO_NET_OFFLINE: 'true'
         run: |
           node scripts/differential/run.mjs --seed 1 --count 1500
           node scripts/differential/run.mjs --seed ${{ github.run_id }} --count 1500
+  consumer:
+    # Each receiver built from the commit under test as an outside project gets it (README.md):
+    # a fresh Go module, a Rust crate with a git dependency, pip from git and a CMake project with
+    # FetchContent. Each verifies the TypeScript-signed Archon proof and denies it with one
+    # changed byte: scripts/consumers/run.sh. It builds the commit rather than a tag because a
+    # release is qualified before it is tagged, on a commit whose core/ tree the tag carries.
+    # Like the receiver jobs it needs the read-only LOGOS_SOURCE_READ_TOKEN; without it this job
+    # says so. The token reaches only the prepare phase, which fetches; Python is set up after
+    # it, and every build runs with Cargo and Go offline.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # thesmos too: the module proxy need not serve an unmerged commit, and thesmos is public.
+      GOPRIVATE: github.com/Bitspark/logos,github.com/Bitspark/thesmos
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      CARGO_TERM_COLOR: never
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      REV: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go/go.mod
+          # No module cache: it would hold the private Logos source, and caches reach other runs.
+          cache: false
+      - run: rustup toolchain install && rustup show active-toolchain
+        working-directory: core/rs
+      - name: Read access to the private Logos sources
+        id: access
+        run: |
+          if [ -z "$LOGOS_SOURCE_READ_TOKEN" ]; then
+            echo "::warning title=Consumers not built::LOGOS_SOURCE_READ_TOKEN is not configured, so this run did not build the receivers as consumers do."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+      - name: Prepare the consumers
+        if: steps.access.outputs.ready == 'true'
+        run: |
+          bash scripts/consumers/run.sh prepare "$REV" "$RUNNER_TEMP/consumers"
+          if grep -rqF -- "$LOGOS_SOURCE_READ_TOKEN" "$HOME/.gitconfig" "${CARGO_HOME:-$HOME/.cargo}" "$(go env GOMODCACHE)" "$RUNNER_TEMP/consumers" 2>/dev/null; then
+            echo "::error::the Logos token reached a file during the fetch"
+            exit 1
+          fi
+        env:
+          LOGOS_SOURCE_READ_TOKEN: ${{ secrets.LOGOS_SOURCE_READ_TOKEN }}
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.LOGOS_SOURCE_READ_TOKEN }}@github.com/Bitspark/logos.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/Bitspark/logos
+      - if: steps.access.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build and run the consumers
+        if: steps.access.outputs.ready == 'true'
+        run: bash scripts/consumers/run.sh verify "$REV" "$RUNNER_TEMP/consumers"
