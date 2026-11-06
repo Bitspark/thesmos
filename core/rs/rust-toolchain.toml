@@ -1,0 +1,7 @@
+# The minimum supported Rust (the Ontos 0.13 crates need 1.96), so CI tests exactly it and a
+# newer stable cannot turn CI red by itself. Consumers building this crate as a dependency use
+# their own toolchain.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

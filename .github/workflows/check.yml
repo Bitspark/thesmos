@@ -141,7 +141,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       # No cargo cache: it would hold the private Logos source, and caches reach other runs.
-      - run: rustup show active-toolchain && cargo fmt --check
+      # core/rs/rust-toolchain.toml pins the minimum supported Rust; install exactly it.
+      - run: rustup toolchain install && rustup show active-toolchain && cargo fmt --check
       - name: Read access to the private Logos crate
         id: access
         run: |

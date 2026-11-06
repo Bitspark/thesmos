@@ -97,7 +97,8 @@ impl Verifier {
     }
 
     /// Checks `proof`, Ontos-encoded bytes, for exactly `query`. Any failure denies, including a
-    /// panic in the authentication adapter.
+    /// panic in the authentication adapter (with the default `panic = "unwind"`; under
+    /// `panic = "abort"` a panic ends the process instead).
     pub fn verify(&self, query: &Query, proof: &[u8]) -> Decision {
         catch_unwind(AssertUnwindSafe(|| self.decide(query, proof))).unwrap_or_else(|panic| {
             let message = panic

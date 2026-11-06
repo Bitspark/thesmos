@@ -164,10 +164,11 @@ It is the same receiver as the Go module: no search, no hand-written authority r
 and the decision left to Logos's Rust checker (`logos-contract` at tag `v0.24.0`),
 with Ontos 0.13.0 values and `bitspark-archon-core` 0.16.0. The Archon adapter is the
 default feature `archon`; with `default-features = false` you supply your own
-`Fn(&Bundle, &Value) -> bool`. Its tests run `law/conformance.ontos` and the same
-TypeScript-signed Archon proof as Go, on Windows, Linux and macOS. `logos-contract` is
-not on crates.io and comes from the private Logos repository: give git read access to
-it and set `CARGO_NET_GIT_FETCH_WITH_CLI=true` to use your git credentials.
+`Fn(&Bundle, &Value) -> bool + Send + Sync + 'static`. It needs Rust 1.96 or later.
+Its tests run `law/conformance.ontos` and the same TypeScript-signed Archon proof
+as Go, on Windows, Linux and macOS. `logos-contract` is not on crates.io and comes
+from the private Logos repository: give git read access to it and set
+`CARGO_NET_GIT_FETCH_WITH_CLI=true` to use your git credentials.
 
 Run `npm run build && npm run example`. The
 [document service](examples/document-service.ts) carries root → team → docs
