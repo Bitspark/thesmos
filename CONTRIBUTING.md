@@ -58,6 +58,10 @@ receiver logic or law copy of its own, so a receiver change reaches it through
 with `cmake -S core/cpp -B build && cmake --build build && ctest --test-dir build`,
 which needs the same Logos access and OpenSSL 3 for the corpus's example keys. The
 `cpp` job (Linux, macOS) uses the same token and the same warning.
+
+A release cites one qualifying run in which the `go`, `rust` and `cpp` jobs' tests
+ran on the release commit, or on a commit whose `core/` tree is identical
+(`git diff <that> <release> -- core` is empty).
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read

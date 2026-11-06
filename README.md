@@ -15,17 +15,23 @@ available:** the required `@bitspark/logos-contract@0.24.0` and optional client
 dependency `@bitspark/logos-kernel@0.24.0` are currently private GitHub packages.
 This source preview is not a public npm release. Other dependencies are public.
 
-The [v1.0.0-preview.5 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.5)
+The [v1.0.0-preview.6 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.6)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
-of preview.4 (the optional `/remote` entry for remote proof production, the
-provider-side helpers in `/client` and declarations that type-check under
-NodeNext), it embeds the frozen law at build time, so
-the root, `/identity` and `/remote` read no files at runtime, and qualifies the
-optional Archon adapter with Archon 0.16.0. Its other dependencies are unchanged
-from preview.4. Its complete gate passed 113 tests and preserved all eight frozen
-artifacts. Consumers need the stated Logos access; release archives bundle no
-private dependency code. The `/client` and `/archon` entries still require their
-optional peers at the versions below.
+of preview.5 (the law embedded at build time and Archon 0.16.0), it adds
+receivers in three more languages that verify the same proofs with no Node
+runtime: Go (`github.com/Bitspark/thesmos/core/go`, tagged
+`core/go/v1.0.0-preview.6`), Rust (the crate `bitspark-thesmos` in `core/rs`, at
+the `v1.0.0-preview.6` tag) and C and C++ (`core/cpp`, the Rust receiver behind a
+C ABI with a header-only C++20 wrapper, built from source by CMake at the same
+tag). Each delegates checking to Logos's checker in its language and passes
+`law/conformance.ontos` and the TypeScript-signed Archon proof. It also lets a
+proof-producing host select its Logos search implementation through the
+`search` option. The npm package's dependencies are unchanged from preview.5.
+Its complete gate passed 119 TypeScript tests and the Go, Rust and C/C++
+receivers' tests, and preserved all eight frozen artifacts. Consumers need the
+stated Logos access; release archives bundle no private dependency code. The
+`/client` and `/archon` entries still require their optional peers at the
+versions below.
 
 With existing GitHub Packages read access, install the committed lockfile and
 run the complete gate:
