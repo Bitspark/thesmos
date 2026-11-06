@@ -1,0 +1,136 @@
+name: release
+# Releases a qualified, merged release commit: its tags and its GitHub release with the npm archive
+# that check.yml built from it, a release manifest and SHA256SUMS (CONTRIBUTING.md). It never
+# receives the Logos token and runs no receiver tests: it checks through the API that the
+# qualifying check.yml run had Logos access in every Logos job, on a commit with the release
+# commit's core/ tree. No package registry is published to while Logos is private (#49, #12).
+#
+# Dispatched from main only; there is no tag trigger. A release pushes two tags, which would
+# trigger one.
+#   rehearse  every check, and the candidate files as a workflow artifact; writes nothing
+#   release   the same checks, then, behind the `release` environment, creates the missing tags and
+#             the GitHub release or finishes a partial one; then verify
+#   verify    reads only: the tags and the release's files
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [rehearse, release, verify]
+        default: rehearse
+      version:
+        description: The version, as in package.json (for example 1.0.0-preview.8)
+        required: true
+      commit:
+        description: The release commit, the release PR's squash merge on main (full hash)
+        required: true
+      qualifying_run:
+        description: The check.yml run with Logos access on the release PR's head (rehearse and release)
+        required: false
+      qualifying_attempt:
+        description: That run's attempt
+        required: false
+        default: '1'
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  check:
+    if: inputs.mode != 'verify'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Dispatched from main
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::dispatch release.yml from main, not $GITHUB_REF"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: The release environment is protected
+        if: inputs.mode == 'release'
+        # A job naming a missing environment would create it unprotected and run at once.
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/environments/release" --jq '[.protection_rules[]?.type] | index("required_reviewers")' | grep -qx '[0-9][0-9]*'; then
+            echo "::error::the release environment is missing or has no required reviewers"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Check the release commit, the qualifying run and the tags
+        run: bash scripts/release/release.sh check "$VERSION" "$COMMIT" "$RUN" "$ATTEMPT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          RUN: ${{ inputs.qualifying_run }}
+          ATTEMPT: ${{ inputs.qualifying_attempt }}
+      - name: Assemble the candidate
+        run: bash scripts/release/release.sh candidate "$VERSION" "$COMMIT" "$RUN" "$ATTEMPT" "$RUNNER_TEMP/candidate"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          RUN: ${{ inputs.qualifying_run }}
+          ATTEMPT: ${{ inputs.qualifying_attempt }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ inputs.version }}
+          path: ${{ runner.temp }}/candidate/
+          if-no-files-found: error
+  publish:
+    if: inputs.mode == 'release'
+    needs: check
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-${{ inputs.version }}
+          path: ${{ runner.temp }}/candidate
+      - name: Create the tags and the GitHub release, or finish a partial one
+        run: bash scripts/release/release.sh publish "$VERSION" "$COMMIT" "$RUNNER_TEMP/candidate"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+  verify:
+    needs: publish
+    if: always() && (inputs.mode == 'verify' || needs.publish.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go/go.mod
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: The tags and the release's files
+        run: bash scripts/release/release.sh verify "$VERSION" "$COMMIT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}

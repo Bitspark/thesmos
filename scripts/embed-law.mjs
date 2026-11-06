@@ -64,13 +64,31 @@ for (const [language, files] of Object.entries(copies)) {
   }
   if (stale.length) throw new Error(`core/${language} law copy differs from law/: ${stale.join(", ")}; run node scripts/embed-law.mjs --${language}`);
   if (language === "rs") {
-    // The crates are released with the npm package's version, under the same tag. Copying
-    // cannot fix a version, so this is reported separately.
-    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    const manifests = ["core/rs/Cargo.toml", "core/cpp/Cargo.toml", "core/py/Cargo.toml"];
-    const wrong = manifests.filter(manifest =>
-      readFileSync(new URL(`../${manifest}`, import.meta.url), "utf8").match(/^version = "([^"]+)"/m)?.[1] !== version);
-    if (wrong.length) throw new Error(`${wrong.join(", ")} must carry package.json's version ${version}`);
+    // Every package is released with the npm package's version, under the same tag, so every
+    // field that states it must agree: the manifests, their lock entries and CMake's numeric
+    // version (which cannot hold a pre-release). Copying cannot fix a version, so this is
+    // reported separately. release.yml relies on this check at the release commit.
+    const text = path => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    const { version } = JSON.parse(text("package.json"));
+    const lock = JSON.parse(text("package-lock.json"));
+    const locked = (path, name) =>
+      text(path).match(new RegExp(`^name = "${name}"\\r?\\nversion = "([^"]+)"`, "m"))?.[1];
+    const fields = {
+      "package-lock.json version": lock.version,
+      'package-lock.json packages[""].version': lock.packages?.[""]?.version,
+      ...Object.fromEntries(["core/rs/Cargo.toml", "core/cpp/Cargo.toml", "core/py/Cargo.toml"]
+        .map(path => [path, text(path).match(/^version = "([^"]+)"/m)?.[1]])),
+      "core/rs/Cargo.lock bitspark-thesmos": locked("core/rs/Cargo.lock", "bitspark-thesmos"),
+      "core/cpp/Cargo.lock bitspark-thesmos": locked("core/cpp/Cargo.lock", "bitspark-thesmos"),
+      "core/cpp/Cargo.lock bitspark-thesmos-capi": locked("core/cpp/Cargo.lock", "bitspark-thesmos-capi"),
+      "core/py/Cargo.lock bitspark-thesmos": locked("core/py/Cargo.lock", "bitspark-thesmos"),
+      "core/py/Cargo.lock bitspark-thesmos-py": locked("core/py/Cargo.lock", "bitspark-thesmos-py"),
+    };
+    const wrong = Object.entries(fields).filter(([, found]) => found !== version)
+      .map(([field, found]) => `${field} (${found ?? "missing"})`);
+    const cmake = text("core/cpp/CMakeLists.txt").match(/^project\(thesmos VERSION ([0-9.]+)/m)?.[1];
+    if (cmake !== version.split("-")[0]) wrong.push(`core/cpp/CMakeLists.txt project VERSION (${cmake ?? "missing"})`);
+    if (wrong.length) throw new Error(`these must carry package.json's version ${version}: ${wrong.join(", ")}`);
   }
   console.log(write ? `Copied the frozen law into core/${language}.` : `The core/${language} law copy equals law/.`);
 }
