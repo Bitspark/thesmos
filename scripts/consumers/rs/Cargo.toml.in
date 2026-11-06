@@ -1,7 +1,8 @@
 [package]
 name = "thesmos-consumer"
 version = "0.0.0"
-edition = "2021"
+# As `cargo new` writes today: resolver 3 picks dependency releases the toolchain can build.
+edition = "2024"
 publish = false
 
 # Not a member of any enclosing workspace.

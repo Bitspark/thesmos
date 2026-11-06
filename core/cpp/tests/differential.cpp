@@ -81,7 +81,8 @@ int main() {
         : kind == "accept"  ? thesmos::Verifier(root, [](auto, const auto&, const auto&) { return true; })
                             : throw std::runtime_error("unknown authenticator " + kind);
     const thesmos::Decision d = verifier.verify({q[0], q[1], q[2]}, entry[2].bytes());
-    const bool panicked = d.detail.starts_with("verification failed: ");
+    // core/rs's own catch, or the C layer's outer guard around it.
+    const bool panicked = d.detail.starts_with("verification failed: ") || d.detail == "verification panicked";
     out += "{\"i\":" + std::to_string(i) + ",\"permitted\":" + (d.permitted ? "true" : "false") +
            ",\"code\":" + json_string(d.code) + ",\"steps\":" + std::to_string(d.permitted ? d.checked_steps : 0) +
            ",\"panicked\":" + (panicked ? "true" : "false") + "}\n";

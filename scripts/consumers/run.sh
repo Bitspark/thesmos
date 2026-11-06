@@ -5,6 +5,7 @@
 #
 #   bash scripts/consumers/run.sh prepare <commit> <dir>
 #   bash scripts/consumers/run.sh verify <commit> <dir>
+#   bash scripts/consumers/run.sh tag <commit> <version>
 #
 # prepare is the only phase that needs read access to the private Logos sources. It fetches thesmos
 # at <commit> into <dir>/thesmos, makes a fresh Go module and Rust crate that require it at that
@@ -17,14 +18,20 @@
 # verify runs without Logos access, with Cargo and Go offline: go run, cargo run, pip install
 # "git+…@<commit>#subdirectory=core/py" into a fresh virtual environment, and a CMake project
 # with FetchContent at <commit>. pip still fetches its build backend, and CMake its sources.
+#
+# A release is qualified on its commit before it is tagged. After tagging, tag checks without
+# Logos access that the tags consumers name resolve to that commit: the root tag v<version>
+# (Cargo, pip, FetchContent) through git, and the Go module's core/go/v<version> through
+# proxy.golang.org, as a Go consumer resolves it.
 set -euo pipefail
 
 phase=${1:?phase}
 rev=${2:?commit}
-dir=${3:?directory}
+arg=${3:?directory or version}
 here=$(cd "$(dirname "$0")" && pwd)
 repo=https://github.com/Bitspark/thesmos
 [[ $rev =~ ^[0-9a-f]{40}$ ]] || { echo "the commit must be a full hash: $rev" >&2; exit 2; }
+dir=$arg
 src=$dir/thesmos
 toolchain() { sed -n 's/^channel *= *"\(.*\)"/\1/p' "$src/core/rs/rust-toolchain.toml"; }
 
@@ -61,7 +68,8 @@ prepare() {
 }
 
 verify() {
-  export CARGO_NET_OFFLINE=true GOPROXY=off
+  # GOPROXY=off alone would still fetch GOPRIVATE modules from git.
+  export CARGO_NET_OFFLINE=true GOPROXY=off GONOPROXY=none
   local vector=$src/core/rs/tests/data/archon-document.ontos
   [ -f "$vector" ] || { echo "run prepare first" >&2; exit 2; }
 
@@ -85,8 +93,23 @@ verify() {
   ctest --test-dir "$dir/cpp/build" -C Release --output-on-failure --verbose
 }
 
+tag() {
+  local version=$arg tagged module
+  [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "not a version: $version" >&2; exit 2; }
+  # An annotated tag's ^{} line names its commit; a lightweight tag's own line does.
+  tagged=$(git ls-remote "$repo" "refs/tags/v$version" "refs/tags/v$version^{}" | sort -k2 | tail -1 | cut -f1)
+  echo "v$version: ${tagged:-missing}"
+  # From an empty directory, through the public proxy, as a Go consumer resolves the version.
+  module=$(cd "$(mktemp -d)" && GOPROXY=https://proxy.golang.org GOPRIVATE= GONOPROXY= GONOSUMDB= GOFLAGS= \
+    go list -m -json "github.com/Bitspark/thesmos/core/go@v$version" |
+    sed -n 's/.*"Hash": "\([0-9a-f]\{40\}\)".*/\1/p')
+  echo "core/go@v$version (proxy.golang.org): ${module:-missing}"
+  [ "$tagged" = "$rev" ] && [ "$module" = "$rev" ] || { echo "the tags do not resolve to $rev" >&2; exit 1; }
+}
+
 case $phase in
   prepare) prepare ;;
   verify) verify ;;
+  tag) tag ;;
   *) echo "unknown phase: $phase" >&2; exit 2 ;;
 esac

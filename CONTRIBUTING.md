@@ -77,13 +77,16 @@ reproduces a CI run and `--langs ts,go,rs` narrows it. C++ decides through its C
 interface, so the comparison covers that layer too. The `differential` CI job runs it
 with a fixed seed and with the run's own seed.
 
-Each receiver must also work as an outside project gets it. `bash
-scripts/consumers/run.sh prepare <commit> <dir>` makes a fresh Go module, a Rust crate
-with a git dependency, a pip virtual environment and a CMake project with FetchContent,
-each taking thesmos at that commit as README.md shows with a tag; `verify` builds them
-with Cargo and Go offline and checks that each accepts the TypeScript-signed Archon proof
-and denies it with one changed byte. Only `prepare` needs Logos access. The `consumer` CI job runs it on the
-commit under test.
+Each receiver must also work as an outside project gets it.
+`bash scripts/consumers/run.sh prepare <commit> <dir>` makes a fresh Go module, a Rust
+crate with a git dependency, a pip virtual environment and a CMake project with
+FetchContent, each taking thesmos at that commit as README.md shows with a tag. `verify`
+builds them with Cargo and Go offline and checks that each accepts the TypeScript-signed
+Archon proof and denies it with one changed byte. Only `prepare` needs Logos access. The
+`consumer` CI job runs both on the commit under test. A release is qualified on its commit
+before it is tagged; after tagging, `run.sh tag <commit> <version>` checks without Logos
+access that `v<version>` and the Go module's `core/go/v<version>` (through
+proxy.golang.org) resolve to that commit.
 
 A release cites one qualifying run in which the `go`, `rust`, `cpp`, `python`,
 `differential` and `consumer` jobs' tests ran on the release commit, or on a commit whose
