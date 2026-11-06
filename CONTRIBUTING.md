@@ -90,7 +90,9 @@ proxy.golang.org) resolve to that commit.
 
 A release cites one qualifying run in which the `go`, `rust`, `cpp`, `python`,
 `differential` and `consumer` jobs' tests ran on the release commit, or on a commit whose
-`core/` tree is identical (`git diff <that> <release> -- core` is empty).
+`core/` tree is identical (`git diff <that> <release> -- core` is empty). After tagging,
+the release notes also cite a passing `bash scripts/consumers/run.sh tag <that commit>
+<version>`, which shows that the tags consumers name resolve to the qualified commit.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read
