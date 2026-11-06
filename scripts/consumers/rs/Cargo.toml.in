@@ -1,0 +1,15 @@
+[package]
+name = "thesmos-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Not a member of any enclosing workspace.
+[workspace]
+
+[dependencies]
+# As README.md shows, with the commit under test (scripts/consumers/run.sh writes it) for the tag.
+thesmos = { package = "bitspark-thesmos", git = "https://github.com/Bitspark/thesmos", rev = "@REV@" }
+# Reads the vector file. It must be the Ontos version thesmos uses, so that its values are
+# thesmos::Value: change it with thesmos's own Ontos version.
+ontos-codec = { package = "bitspark-ontos-codec", version = "0.13" }

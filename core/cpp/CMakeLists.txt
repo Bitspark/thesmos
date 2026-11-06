@@ -51,10 +51,17 @@ if(THESMOS_BUILD_TESTS)
   target_link_libraries(thesmos_c_smoke PRIVATE thesmos::thesmos)
   add_test(NAME c_smoke COMMAND thesmos_c_smoke)
 
+  # The C++ decider of the cross-language differential test (scripts/differential), run by
+  # scripts/differential/run.mjs rather than by ctest.
+  add_executable(thesmos_differential tests/differential.cpp)
+  target_link_libraries(thesmos_differential PRIVATE thesmos::thesmos OpenSSL::Crypto)
+
   if(MSVC)
     target_compile_options(thesmos_receiver_tests PRIVATE /W4 /WX)
+    target_compile_options(thesmos_differential PRIVATE /W4 /WX)
   else()
     target_compile_options(thesmos_receiver_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(thesmos_differential PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(thesmos_c_smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
   endif()
 endif()

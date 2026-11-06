@@ -69,17 +69,25 @@ Linux, macOS; CPython 3.10 and 3.13) uses the same token and the same warning, a
 never uploads a wheel, which would hold compiled Logos code.
 
 The receivers must decide alike. `node scripts/differential/run.mjs` (after
-`npm run build`, with Go, Rust and the installed Python extension) feeds every
-receiver the frozen corpus, the Archon vector and seeded mutations of both, and fails
-unless TypeScript, Go, Rust and Python agree on permitted, code and checked steps for
-each input; `--seed <n>` reproduces a CI run and `--langs ts,go,rs` narrows it. C/C++
-binds `core/rs`, so its decisions follow Rust's; its C ABI layer is tested by `ctest`, not
-by this comparison. The `differential` CI job runs it with a fixed
-seed and with the run's own seed.
+`npm run build`, with Go, Rust, the installed Python extension and the C++ decider
+`thesmos_differential` built in `core/cpp/build`) feeds every receiver the frozen corpus,
+the Archon vector and seeded mutations of both, and fails unless TypeScript, Go, Rust,
+Python and C++ agree on permitted, code and checked steps for each input; `--seed <n>`
+reproduces a CI run and `--langs ts,go,rs` narrows it. C++ decides through its C
+interface, so the comparison covers that layer too. The `differential` CI job runs it
+with a fixed seed and with the run's own seed.
 
-A release cites one qualifying run in which the `go`, `rust`, `cpp`, `python` and
-`differential` jobs' tests ran on the release commit, or on a commit whose `core/` tree
-is identical (`git diff <that> <release> -- core` is empty).
+Each receiver must also work as an outside project gets it. `bash
+scripts/consumers/run.sh prepare <commit> <dir>` makes a fresh Go module, a Rust crate
+with a git dependency, a pip virtual environment and a CMake project with FetchContent,
+each taking thesmos at that commit as README.md shows with a tag; `verify` builds them
+with Cargo and Go offline and checks that each accepts the TypeScript-signed Archon proof
+and denies it with one changed byte. Only `prepare` needs Logos access. The `consumer` CI job runs it on the
+commit under test.
+
+A release cites one qualifying run in which the `go`, `rust`, `cpp`, `python`,
+`differential` and `consumer` jobs' tests ran on the release commit, or on a commit whose
+`core/` tree is identical (`git diff <that> <release> -- core` is empty).
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The current Logos packages require GitHub Packages read
