@@ -6,7 +6,8 @@ rust-version = "1.96"
 license = "Apache-2.0"
 repository = "https://github.com/Bitspark/thesmos"
 description = "The Spaces authority receiver: verify a supplied proof under the frozen law, with Logos's Rust checker."
-include = ["src/**", "law/**", "tests/**", "Cargo.toml", "rust-toolchain.toml", "LICENSE", "NOTICE"]
+readme = "README.md"
+include = ["src/**", "law/**", "tests/**", "Cargo.toml", "rust-toolchain.toml", "README.md", "LICENSE", "NOTICE"]
 
 [lib]
 name = "thesmos"
