@@ -4,9 +4,8 @@
 #   target_link_libraries(app PRIVATE thesmos::thesmos)
 #   #include <thesmos/thesmos.hpp>              # C++20; C uses <thesmos/thesmos.h>
 #
-# The library is built from source by Cargo through Corrosion. Like the Go module and the Rust
-# crate, it needs read access to the private Bitspark/logos repository for Logos's Rust checker;
-# release archives bundle no private dependency code.
+# The library is built from source by Cargo through Corrosion, with Logos's Rust checker
+# (logos-contract) from crates.io.
 cmake_minimum_required(VERSION 3.22)
 project(thesmos VERSION 1.0.0 LANGUAGES C CXX)
 

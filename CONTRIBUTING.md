@@ -37,18 +37,13 @@ a committed byte copy of `law/` and the corpus (`node scripts/embed-law.mjs --go
 `npm run law:check` fails if that copy differs. Keep Go and TypeScript decisions
 identical: a receiver change lands in both, and both pass `law/conformance.ontos`
 and the shared Archon vector (`scripts/export-archon-vector.mjs`). Run
-`go test ./...` in `core/go` with `GOPRIVATE=github.com/Bitspark/logos`. In CI the
-`go` job tests only when the service desk has issued its read-only
-`LOGOS_SOURCE_READ_TOKEN`, and otherwise warns that Go was not tested. A release
-needs a qualifying run in which that job's tests ran.
+`go test ./...` in `core/go`; the `go` CI job does the same.
 
 The Rust receiver in `core/rs` carries its own byte copy for the same reason: a git
 or vendored crate holds only its directory (`node scripts/embed-law.mjs --rs`, checked
 by `npm run law:check`). It follows the same rule: a receiver change lands in
 TypeScript, Go and Rust, and all three pass the corpus and the Archon vector. Run
-`cargo test` in `core/rs` with `CARGO_NET_GIT_FETCH_WITH_CLI=true` and git read
-access to Bitspark/logos. The `rust` CI job (Windows, Linux, macOS) uses the same
-token and the same warning.
+`cargo test` in `core/rs`; the `rust` CI job does the same on Windows, Linux and macOS.
 
 The C and C++ receiver in `core/cpp` is the Rust receiver behind a C ABI: it has no
 receiver logic or law copy of its own, so a receiver change reaches it through
@@ -56,17 +51,16 @@ receiver logic or law copy of its own, so a receiver change reaches it through
 `cbindgen --config cbindgen.toml --output include/thesmos/thesmos.h src/lib.rs` in
 `core/cpp` (cbindgen 0.29.4); the `cpp-header` CI job fails on any difference. Build and test
 with `cmake -S core/cpp -B build && cmake --build build && ctest --test-dir build`,
-which needs the same Logos access and OpenSSL 3 for the corpus's example keys. The
-`cpp` job (Linux, macOS) uses the same token and the same warning.
+which needs OpenSSL 3 for the corpus's example keys. The `cpp` CI job does the same on
+Linux and macOS.
 
 The Python receiver in `core/py` is the Rust receiver behind PyO3, likewise with no
 receiver logic or law copy of its own. Keep `core/py/thesmos.pyi` in step with
 `core/py/src/lib.rs`. Build and test it in a virtual environment with
 `pip install maturin pytest cryptography`, then `maturin develop --locked` and
-`pytest tests` in `core/py`, which needs the same Logos access. On a `windows-gnu` Rust
-toolchain, PyO3 also needs MinGW's `dlltool` on `PATH`. The `python` job (Windows,
-Linux, macOS; CPython 3.10 and 3.13) uses the same token and the same warning, and
-never uploads a wheel, which would hold compiled Logos code.
+`pytest tests` in `core/py`. On a `windows-gnu` Rust toolchain, PyO3 also needs MinGW's
+`dlltool` on `PATH`. The `python` CI job does the same on Windows, Linux and macOS with
+CPython 3.10 and 3.13; it uploads no wheel.
 
 The receivers must decide alike. `node scripts/differential/run.mjs` (after
 `npm run build`, with Go, Rust, the installed Python extension and the C++ decider
@@ -87,10 +81,10 @@ Each receiver must also work as an outside project gets it.
 crate with a git dependency, a pip virtual environment and a CMake project with
 FetchContent, each taking thesmos at that commit as README.md shows with a tag. `verify`
 builds them with Cargo and Go offline and checks that each accepts the TypeScript-signed
-Archon proof and denies it with one changed byte. Only `prepare` needs Logos access. The
-`consumer` CI job runs both on the commit under test. A release is qualified before it is
-tagged; after tagging, `run.sh tag <release commit> <version>` checks without Logos access
-that `v<version>` and the Go module's `core/go/v<version>` (through proxy.golang.org)
+Archon proof and denies it with one changed byte. The `consumer` CI job runs both on the
+commit under test. A release is qualified before it is tagged; after tagging,
+`run.sh tag <release commit> <version>` checks that `v<version>` and the Go module's
+`core/go/v<version>` (through proxy.golang.org)
 resolve to the release commit on main. With squash merges that is not the qualified PR
 head, only a commit with the same `core/` tree.
 
@@ -103,14 +97,14 @@ workflow makes the release and checks this rule itself:
    --check-rs` names any it missed: the manifests, their lock entries and CMake's
    numeric version) and adds `docs/releases/v<version>.md`. Its first line,
    `# v<version>: <title>`, names the release; the rest is its notes.
-2. The PR's head gets one `check` run with Logos access, the qualifying run.
-3. After that access is removed, the PR is squash-merged. The merge commit on main is
-   the release commit, and its `check` run builds the npm archive.
+2. The PR's `check` run on its head is the qualifying run.
+3. The PR is squash-merged. The merge commit on main is the release commit, and its
+   `check` run builds the npm archive.
 4. Dispatch `release` from main with the version, the release commit and the
    qualifying run and attempt, in mode `rehearse`, then `release`. Both modes check
    through the API that the qualifying run succeeded on a commit with the release
-   commit's `core/` tree, and that each of its Logos jobs ran every step: a run
-   without the token skips some, and is refused. They also check that every version
+   commit's `core/` tree, and that each of its receiver jobs ran every step. They also
+   check that every version
    field at the release commit agrees and that the tags are absent or already at the
    release commit. `release` then waits for approval in the `release` environment. It
    creates `v<version>` and `core/go/v<version>` at the release commit and the GitHub
@@ -120,12 +114,13 @@ workflow makes the release and checks this rule itself:
    (`run.sh tag`) and the files match `SHA256SUMS`.
 
 `bash scripts/release/release.sh check|candidate|publish --dry-run|verify` runs the same
-steps locally with an authenticated `gh`. No package registry is published to while
-Logos is private (#49, #12).
+steps locally with an authenticated `gh`. It publishes to no package registry yet (#49,
+#12).
 Treat test fixtures as evidence, not permission to change the model.
 
-Node 24 is required. The current Logos packages require GitHub Packages read
-access; see README.md. Never commit a credential or an npm configuration
+Node 24 is required. The SDK's development dependencies include Logos's kernel, which
+is published only as a private GitHub package, so the lockfile installs the `@bitspark`
+scope from GitHub Packages with read access; see README.md. Never commit a credential or an npm configuration
 containing one. Public package publication waits for an anonymous dependency
 installation test. No public npm release is implied by a source preview.
 

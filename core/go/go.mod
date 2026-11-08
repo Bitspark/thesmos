@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/Bitspark/archon/core/go v0.16.0
-	github.com/Bitspark/logos/contract/go v0.24.0
+	github.com/Bitspark/logos-contract/contract/go v0.25.0
 	github.com/bitspark/ontos v0.13.0
 )
 

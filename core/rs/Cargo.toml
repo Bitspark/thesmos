@@ -12,11 +12,10 @@ include = ["src/**", "law/**", "tests/**", "Cargo.toml", "rust-toolchain.toml", 
 name = "thesmos"
 path = "src/lib.rs"
 
-# The same cohort as the npm package and the Go module: Logos 0.24.0, Ontos 0.13.0, archon 0.16.0.
-# logos-contract is not on crates.io; like the Go module and the npm package, it comes from the
-# private Bitspark/logos repository, here by its release tag.
+# The same cohort as the npm package and the Go module: Logos 0.25.0, Ontos 0.13.0, archon 0.16.0.
+# Like Ontos and archon, logos-contract is public on crates.io.
 [dependencies]
-logos-contract = { git = "https://github.com/Bitspark/logos", tag = "v0.24.0" }
+logos-contract = "=0.25.0"
 ontos-core = { package = "bitspark-ontos-core", version = "=0.13.0" }
 ontos-codec = { package = "bitspark-ontos-codec", version = "=0.13.0" }
 serde_json = "1"
