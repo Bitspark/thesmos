@@ -232,11 +232,12 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/io" -w /io/core/py quay.io/pypa/manylinux2014_x86_64 bash -euo pipefail -c '
             python=/opt/python/cp310-cp310/bin/python
-            "$python" -m pip install --quiet maturin==1.15.0
-            "$python" -m maturin sdist --out dist
+            # maturin sdist reads the crate through cargo, so Rust comes first.
             curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
             . "$HOME/.cargo/env"
             rustup toolchain install && rustup show active-toolchain
+            "$python" -m pip install --quiet maturin==1.15.0
+            "$python" -m maturin sdist --out dist
             venv=$(mktemp -d)
             "$python" -m venv "$venv"
             "$venv/bin/python" -m pip install --quiet --no-binary bitspark-thesmos dist/*.tar.gz
