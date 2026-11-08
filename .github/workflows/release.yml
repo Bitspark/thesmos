@@ -230,7 +230,8 @@ jobs:
     outputs:
       registries: ${{ steps.record.outputs.registries }}
     env:
-      REGISTRY_RECORD: ${{ runner.temp }}/registries
+      # The job runs on Ubuntu; the runner context is not available at the job level.
+      REGISTRY_RECORD: /tmp/thesmos-release-registries
     steps:
       - uses: actions/checkout@v4
         with:
