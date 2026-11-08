@@ -1,16 +1,37 @@
 name: release
-# Releases a qualified, merged release commit: its tags and its GitHub release with the npm archive
-# that check.yml built from it, a release manifest and SHA256SUMS (CONTRIBUTING.md). It runs no
-# receiver tests: it checks through the API that every receiver job of the qualifying check.yml
-# run ran every step, on a commit with the release commit's core/ tree. It publishes to no package
-# registry yet (#49, #12).
+# Releases a qualified, merged release commit (CONTRIBUTING.md): its tags, its GitHub release with
+# the npm archive that check.yml built from it, a release manifest and SHA256SUMS, and its packages
+# on npm (@bitspark/thesmos), crates.io (bitspark-thesmos) and PyPI (bitspark-thesmos). It runs no
+# receiver tests of its own: it checks through the API that every receiver job of the qualifying
+# check.yml run ran every step, on a commit with the release commit's core/ tree. The Python wheels
+# and the sdist are built here from the release commit, and each is installed and run against the
+# TypeScript-signed Archon proof before anything is published.
 #
-# Dispatched from main only; there is no tag trigger. A release pushes two tags, which would
-# trigger one.
-#   rehearse  every check, and the candidate files as a workflow artifact; writes nothing
-#   release   the same checks, then, behind the `release` environment, creates the missing tags and
-#             the GitHub release or finishes a partial one; then verify
-#   verify    reads only: the tags and the release's files
+# `release` is dispatched from main only; `rehearse` and `verify` write nothing and run from any
+# branch, so a change to this workflow is tried before it merges. There is no tag trigger: a
+# release pushes two tags, which would trigger one.
+#   rehearse  every check, the wheels and the sdist, and the npm and crates.io uploads as dry runs;
+#             the candidate and the Python distributions become workflow artifacts; writes nothing
+#   release   the same, then, behind the `release` environment, creates the missing tags and the
+#             GitHub release or finishes a partial one, and publishes each package its registry
+#             does not have yet; then verify
+#   verify    reads only: the tags, the release's files, and an anonymous install from each
+#             registry that serves the version
+#
+# Registry credentials. None is stored once a registry trusts this workflow: npm, crates.io and
+# PyPI each accept this run's OIDC identity for Bitspark/thesmos, release.yml and the `release`
+# environment. Each is armed by a repository variable, so a registry that is not configured yet
+# gets a warning instead of a red release, and a re-dispatch publishes only what is missing (as
+# does "Re-run failed jobs", which keeps the run's commit):
+#   npm        vars.NPM_TRUSTED_PUBLISHING, with provenance
+#   crates.io  vars.CRATES_IO_TRUSTED_PUBLISHING, through rust-lang/crates-io-auth-action
+#   PyPI       vars.PYPI_TRUSTED_PUBLISHING, with attestations; PyPI accepts a pending publisher
+# npm and crates.io attach a trusted publisher only to a package that exists, so their first
+# version is published by this same job with a bootstrap token the service desk places in the
+# `release` environment (NPM_BOOTSTRAP_TOKEN, CARGO_BOOTSTRAP_TOKEN) and removes afterwards; that
+# npm version carries no provenance. Provenance and attestations name the commit this workflow runs
+# at, so an armed npm or PyPI that still lacks the version needs main at the release commit when
+# this is dispatched; the check job refuses anything else before approval, before any write.
 on:
   workflow_dispatch:
     inputs:
@@ -44,7 +65,8 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Dispatched from main
+      - name: A release is dispatched from main
+        if: inputs.mode == 'release'
         run: |
           if [ "$GITHUB_REF" != refs/heads/main ]; then
             echo "::error::dispatch release.yml from main, not $GITHUB_REF"
@@ -83,23 +105,152 @@ jobs:
           COMMIT: ${{ inputs.commit }}
           RUN: ${{ inputs.qualifying_run }}
           ATTEMPT: ${{ inputs.qualifying_attempt }}
+      - name: The registries this release may publish to, from this commit
+        if: inputs.mode == 'release'
+        run: bash scripts/release/release.sh preflight "$VERSION" "$COMMIT"
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          ARMED_REGISTRIES: >-
+            ${{ vars.NPM_TRUSTED_PUBLISHING == 'true' && 'npm' || '' }}
+            ${{ vars.PYPI_TRUSTED_PUBLISHING == 'true' && 'pypi' || '' }}
+      - name: Rehearse the npm and crates.io uploads
+        run: |
+          bash scripts/release/release.sh npm "$VERSION" "$COMMIT" "$RUNNER_TEMP/candidate" --dry-run
+          bash scripts/release/release.sh crate "$VERSION" "$COMMIT" --dry-run
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-${{ inputs.version }}
           path: ${{ runner.temp }}/candidate/
           if-no-files-found: error
+  wheels:
+    # One abi3 wheel per platform for CPython 3.10 and later, built from the release commit, each
+    # installed on its own platform's runner and run against the Archon proof before upload.
+    if: inputs.mode != 'verify'
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64 }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64 }
+          - { name: macos-universal2, os: macos-latest, target: universal2-apple-darwin }
+          - { name: windows-x64, os: windows-latest, target: x64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - name: The pinned Rust
+        id: rust
+        run: echo "toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' core/py/rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: core/py
+          target: ${{ matrix.target }}
+          manylinux: auto
+          rust-toolchain: ${{ steps.rust.outputs.toolchain }}
+          # The maturin that check.yml's python job builds with.
+          maturin-version: v1.15.0
+          args: --release --locked --out dist
+      # The oldest and newest CPython that check.yml tests.
+      - uses: actions/setup-python@v5
+        id: py310
+        with:
+          python-version: '3.10'
+      - uses: actions/setup-python@v5
+        id: py313
+        with:
+          python-version: '3.13'
+      - name: Install the wheel and verify the Archon proof with it, on CPython 3.10 and 3.13
+        run: |
+          for python in "$PY310" "$PY313"; do
+            venv="$RUNNER_TEMP/venv-$("$python" -c 'import sys; print(sys.version_info[1])')"
+            "$python" -m venv "$venv"
+            py="$venv/bin/python"; [ -x "$py" ] || py="$venv/Scripts/python.exe"
+            "$py" -m pip install --no-index --find-links core/py/dist bitspark-thesmos
+            "$py" -c 'import sys; print(sys.version)'
+            "$py" scripts/consumers/py/verify.py core/rs/tests/data/archon-document.ontos
+          done
+        env:
+          PY310: ${{ steps.py310.outputs.python-path }}
+          PY313: ${{ steps.py313.outputs.python-path }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-${{ matrix.name }}
+          path: core/py/dist/*.whl
+          if-no-files-found: error
+  sdist:
+    # The source distribution, built from the release commit, then built from itself into a wheel
+    # as pip would for a platform without a wheel, and run against the Archon proof.
+    if: inputs.mode != 'verify'
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: core/py
+          command: sdist
+          maturin-version: v1.15.0
+          args: --out dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Build the sdist and verify the Archon proof with it
+        run: |
+          (cd core/py && rustup toolchain install && rustup show active-toolchain)
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --no-binary bitspark-thesmos core/py/dist/*.tar.gz
+          "$RUNNER_TEMP/venv/bin/python" scripts/consumers/py/verify.py core/rs/tests/data/archon-document.ontos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-sdist
+          path: core/py/dist/*.tar.gz
+          if-no-files-found: error
   publish:
     if: inputs.mode == 'release'
-    needs: check
+    needs: [check, wheels, sdist]
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
+      # Trusted publishing on npm, crates.io and PyPI; npm provenance and PyPI attestations.
+      id-token: write
+    outputs:
+      registries: ${{ steps.record.outputs.registries }}
+    env:
+      # The job runs on Ubuntu; the runner context is not available at the job level.
+      REGISTRY_RECORD: /tmp/thesmos-release-registries
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      # npm 11.5.1 or later exchanges this run's OIDC identity for publish rights when npm trusts
+      # this workflow, so trusted mode sets no NODE_AUTH_TOKEN.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: The registries this release may publish to, from this commit
+        run: bash scripts/release/release.sh preflight "$VERSION" "$COMMIT"
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          ARMED_REGISTRIES: >-
+            ${{ vars.NPM_TRUSTED_PUBLISHING == 'true' && 'npm' || '' }}
+            ${{ vars.PYPI_TRUSTED_PUBLISHING == 'true' && 'pypi' || '' }}
       - uses: actions/download-artifact@v4
         with:
           name: release-candidate-${{ inputs.version }}
@@ -110,6 +261,71 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           COMMIT: ${{ inputs.commit }}
+      - name: Publish the npm archive
+        run: bash scripts/release/release.sh npm "$VERSION" "$COMMIT" "$RUNNER_TEMP/candidate"
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          NPM_PUBLISH: ${{ vars.NPM_TRUSTED_PUBLISHING == 'true' && 'trusted' || (secrets.NPM_BOOTSTRAP_TOKEN != '' && 'bootstrap' || 'off') }}
+          NODE_AUTH_TOKEN: ${{ vars.NPM_TRUSTED_PUBLISHING != 'true' && secrets.NPM_BOOTSTRAP_TOKEN || '' }}
+      - name: A crates.io token from this run's identity
+        id: crates-io
+        if: vars.CRATES_IO_TRUSTED_PUBLISHING == 'true'
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - name: Publish the crate
+        run: bash scripts/release/release.sh crate "$VERSION" "$COMMIT"
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token || secrets.CARGO_BOOTSTRAP_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: python-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/python
+      - name: The Python distributions, at the release commit
+        id: python
+        run: |
+          pep440=${VERSION/-preview./rc}
+          ls -l "$RUNNER_TEMP/python"
+          [ "$(ls "$RUNNER_TEMP/python" | wc -l)" = 5 ] || { echo "::error::expected four wheels and an sdist"; exit 1; }
+          for f in "$RUNNER_TEMP"/python/*; do
+            case $(basename "$f") in bitspark_thesmos-"$pep440"[-.]*) ;; *) echo "::error::$f is not bitspark-thesmos $pep440"; exit 1 ;; esac
+          done
+          served=$(curl -sf "https://pypi.org/pypi/bitspark-thesmos/$pep440/json" | jq -r '.urls[].filename' || true)
+          missing=0
+          for f in "$RUNNER_TEMP"/python/*; do grep -qxF "$(basename "$f")" <<<"$served" || missing=$((missing + 1)); done
+          if [ "$missing" = 0 ]; then
+            echo "PyPI already serves all five files of bitspark-thesmos $pep440"
+            echo "pypi" >> "$REGISTRY_RECORD"
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+          elif [ "$ARMED" != true ]; then
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_SHA" != "$COMMIT" ]; then
+            echo "::error::PyPI lacks $missing file(s) and this run is at $GITHUB_SHA, not the release commit $COMMIT, so their attestations would name the wrong source"
+            exit 1
+          else
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          ARMED: ${{ vars.PYPI_TRUSTED_PUBLISHING == 'true' }}
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        if: steps.python.outputs.upload == 'true'
+        with:
+          packages-dir: ${{ runner.temp }}/python
+          skip-existing: true
+      - name: PyPI got them
+        if: steps.python.outputs.upload == 'true'
+        run: echo "pypi" >> "$REGISTRY_RECORD"
+      - name: What PyPI did not get
+        if: vars.PYPI_TRUSTED_PUBLISHING != 'true'
+        run: echo "::warning::bitspark-thesmos was built but not published to PyPI because vars.PYPI_TRUSTED_PUBLISHING is not 'true'"
+      - name: The registries that serve this release
+        id: record
+        if: always()
+        run: echo "registries=$(sort -u "$REGISTRY_RECORD" 2>/dev/null | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
   verify:
     needs: publish
     if: always() && (inputs.mode == 'verify' || needs.publish.result == 'success')
@@ -128,9 +344,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - name: The tags and the release's files
         run: bash scripts/release/release.sh verify "$VERSION" "$COMMIT"
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           COMMIT: ${{ inputs.commit }}
+      - name: An anonymous install from each registry
+        run: bash scripts/release/release.sh registries "$VERSION" "$COMMIT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          PYTHON: python
+          # What this run's publish job published or found, and every armed registry.
+          EXPECT_REGISTRIES: >-
+            ${{ needs.publish.outputs.registries }}
+            ${{ vars.NPM_TRUSTED_PUBLISHING == 'true' && 'npm' || '' }}
+            ${{ vars.CRATES_IO_TRUSTED_PUBLISHING == 'true' && 'crates' || '' }}
+            ${{ vars.PYPI_TRUSTED_PUBLISHING == 'true' && 'pypi' || '' }}
