@@ -113,9 +113,10 @@ workflow makes the release and checks this rule itself:
    `v<version>` and `core/go/v<version>` at the release commit and the GitHub release with
    the archive, `release-manifest.json` and `SHA256SUMS`, or finishes a partial release; it
    never moves a tag or replaces a file. It then publishes what each registry does not have
-   yet: the release's exact npm archive to npm as `@bitspark/thesmos` (dist-tag `preview`
-   for a preview), `bitspark-thesmos` to crates.io from the release commit, and the wheels
-   and sdist to PyPI as `bitspark-thesmos` (`1.0.0rcN` for `1.0.0-preview.N`).
+   yet: the release's exact npm archive to npm as `@bitspark/thesmos` (dist-tag `latest`;
+   a preview takes `preview` once a stable version exists), `bitspark-thesmos` to crates.io
+   from the release commit, and the wheels and sdist to PyPI as `bitspark-thesmos`
+   (`1.0.0rcN` for `1.0.0-preview.N`).
 6. It ends with `verify`, which can also be dispatched alone. It checks that the tags
    resolve to the release commit (`run.sh tag`) and that the files match `SHA256SUMS`. It
    then installs anonymously from each registry that serves the version, checks that npm
@@ -126,7 +127,9 @@ registry token is stored. Each registry is armed by a repository variable
 (`NPM_TRUSTED_PUBLISHING`, `CRATES_IO_TRUSTED_PUBLISHING`, `PYPI_TRUSTED_PUBLISHING`);
 until it is, `release` warns and publishes nothing there, and a later dispatch fills it in.
 npm provenance and PyPI attestations name the commit the workflow runs at, which is why it
-must run while main is at the release commit; trusted publishing refuses any other.
+must run while main is at the release commit. The `check` job refuses any other commit
+before approval, when an armed npm or PyPI still lacks the version. To finish a partial
+release, use "Re-run failed jobs": it keeps the run's commit.
 npm and crates.io attach a trusted publisher only to a package that exists, so the first
 version of each is published by this same job with a bootstrap token that the service desk
 places in the `release` environment and removes afterwards; that npm version has no

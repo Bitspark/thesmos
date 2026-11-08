@@ -11,6 +11,7 @@
 #   bash scripts/release/release.sh npm       <version> <commit> <dir> [--dry-run]
 #   bash scripts/release/release.sh crate     <version> <commit> [--dry-run]
 #   bash scripts/release/release.sh registries <version> <commit>
+#   bash scripts/release/release.sh preflight <version> <commit>
 #
 # check      The release commit is on main, carries <version> in every field (its own
 #            `embed-law.mjs --check-rs`) and has notes in docs/releases/v<version>.md. The
@@ -30,7 +31,8 @@
 #            that version is already there. NPM_PUBLISH says how: `trusted` (OIDC, with
 #            provenance, only in a run at the release commit), `bootstrap` (NODE_AUTH_TOKEN, no
 #            provenance: the first version, before a trusted publisher can exist) or `off`.
-#            Previews get the dist-tag `preview`. --dry-run packs and checks without uploading.
+#            It takes the dist-tag `latest`, except a preview once a stable version exists,
+#            which takes `preview`. --dry-run packs and checks without uploading.
 # crate      Publishes bitspark-thesmos from the release commit to crates.io with
 #            CARGO_REGISTRY_TOKEN (minted from OIDC, or a bootstrap token), unless that version is
 #            already there. --dry-run packages and builds it without uploading.
@@ -40,6 +42,11 @@
 #            archive. A registry named in EXPECT_REGISTRIES (for example "npm crates pypi") that
 #            does not serve <version> within ten minutes fails it; any other is reported.
 #            PyPI's version is the PEP 440 form: 1.0.0-preview.N is 1.0.0rcN.
+# preflight  Before anything is written: a registry named in ARMED_REGISTRIES (npm, pypi) that
+#            still lacks <version> would get provenance or attestations naming this run's commit,
+#            so the run must be at the release commit.
+# The npm and crate phases append the registry's name to REGISTRY_RECORD, when set, once it
+# serves <version>, so verify can expect exactly those registries.
 set -euo pipefail
 
 fail() { echo "release: $*" >&2; exit 1; }
@@ -249,9 +256,15 @@ at_release_commit() {
     fail "this run is at ${GITHUB_SHA:-no commit}, not the release commit $commit, so provenance would name the wrong source: dispatch release.yml while main is at the release commit"
 }
 
+record() { [ -z "${REGISTRY_RECORD:-}" ] || echo "$1" >> "$REGISTRY_RECORD"; }
+
 npm_publish() {
   local dir=$1 dry=${2:-} mode=${NPM_PUBLISH:-off} tag=latest
-  [[ $version == *-* ]] && tag=preview
+  # A preview is `latest` until a stable version exists, so a plain install gets the newest one.
+  if [[ $version == *-* ]] && npm view "$npm_name" versions --json --registry "$npmjs" \
+      --@bitspark:registry="$npmjs" 2>/dev/null | grep -q '"[0-9]*\.[0-9]*\.[0-9]*"'; then
+    tag=preview
+  fi
   (cd "$dir" && sha256sum --quiet -c SHA256SUMS) || fail "$dir does not match its SHA256SUMS"
   [ -f "$dir/$package" ] || fail "$dir has no $package"
   if [ "$dry" = --dry-run ]; then
@@ -259,7 +272,7 @@ npm_publish() {
     echo "npm: would publish $npm_name@$version (dist-tag $tag) as '$mode'"
     return
   fi
-  if on_npm; then echo "npm: $npm_name@$version is already published"; return; fi
+  if on_npm; then echo "npm: $npm_name@$version is already published"; record npm; return; fi
   case $mode in
     trusted)
       at_release_commit
@@ -273,12 +286,13 @@ npm_publish() {
     *) fail "NPM_PUBLISH must be trusted, bootstrap or off, not $mode" ;;
   esac
   echo "npm: published $npm_name@$version (dist-tag $tag, $mode)"
+  record npm
 }
 
 crate_publish() {
   local dry=${1:-} manifest
   if [ "$dry" != --dry-run ]; then
-    if on_crates; then echo "crates.io: $crate@$version is already published"; return; fi
+    if on_crates; then echo "crates.io: $crate@$version is already published"; record crates; return; fi
     if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
       echo "::warning::crates.io: $crate@$version was not published: neither trusted publishing (vars.CRATES_IO_TRUSTED_PUBLISHING) nor a bootstrap token is configured"
       return
@@ -287,9 +301,30 @@ crate_publish() {
   release_tree
   manifest=$(sed -n 's/^version = "\(.*\)"/\1/p' "$scratch/tree/core/rs/Cargo.toml" | head -1)
   [ "$manifest" = "$version" ] || fail "core/rs/Cargo.toml at $commit is $manifest, not $version"
-  (cd "$scratch/tree/core/rs" && rustup toolchain install >/dev/null && cargo publish --locked $dry)
-  if [ "$dry" = --dry-run ]; then echo "crates.io: $crate@$version packages and builds"
-  else echo "crates.io: published $crate@$version"; fi
+  # The real upload runs no build script or proc macro, so no dependency's code runs beside the
+  # registry credentials: the dry run already built this commit and lockfile, in a job without them.
+  if [ "$dry" = --dry-run ]; then
+    (cd "$scratch/tree/core/rs" && rustup toolchain install >/dev/null && cargo publish --locked --dry-run)
+    echo "crates.io: $crate@$version packages and builds"
+  else
+    (cd "$scratch/tree/core/rs" && rustup toolchain install >/dev/null && cargo publish --locked --no-verify)
+    echo "crates.io: published $crate@$version"
+    record crates
+  fi
+}
+
+preflight() {
+  local armed=" ${ARMED_REGISTRIES:-} "
+  if [[ $armed == *" npm "* ]] && ! on_npm; then at_release_commit; fi
+  if [[ $armed == *" pypi "* ]] && ! on_pypi; then at_release_commit; fi
+  echo "preflight: ${GITHUB_SHA:-this run} may publish $version to the armed registries (${ARMED_REGISTRIES:-none})"
+}
+
+# Installing goes through each registry's index, which can lag behind its API.
+retry() {
+  local i
+  for i in 1 2 3 4 5; do "$@" && return 0; echo "retrying in 30 s: $*"; sleep 30; done
+  return 1
 }
 
 # Polls a registry that has accepted a version but may not serve it yet.
@@ -315,9 +350,9 @@ registries() {
     mkdir -p "$work/npm/served"
     : > "$work/npm/empty.npmrc"
     (cd "$work/npm" && npm init -y >/dev/null &&
-      npm install --userconfig "$work/npm/empty.npmrc" --registry "$npmjs" --@bitspark:registry="$npmjs" \
+      retry npm install --userconfig "$work/npm/empty.npmrc" --registry "$npmjs" --@bitspark:registry="$npmjs" \
         --no-audit --no-fund --ignore-scripts "$npm_name@$version" "@bitspark/archon@$archon" >/dev/null &&
-      npm pack "$npm_name@$version" --userconfig "$work/npm/empty.npmrc" --registry "$npmjs" \
+      retry npm pack "$npm_name@$version" --userconfig "$work/npm/empty.npmrc" --registry "$npmjs" \
         --@bitspark:registry="$npmjs" --pack-destination "$work/npm/served" >/dev/null)
     gh release download "$tag" -R "$repo" -p "$package" -D "$work/npm/release" --clobber
     cmp -s "$work/npm/served/$package" "$work/npm/release/$package" ||
@@ -334,7 +369,7 @@ registries() {
       "$tools/scripts/consumers/rs/Cargo.toml.in" > "$work/rs/Cargo.toml"
     cp "$tools/scripts/consumers/rs/main.rs" "$work/rs/src/main.rs"
     cp "$scratch/tree/core/rs/rust-toolchain.toml" "$work/rs/"
-    (cd "$work/rs" && rustup toolchain install >/dev/null && cargo run --quiet --release -- "$vector")
+    (cd "$work/rs" && rustup toolchain install >/dev/null && retry cargo run --quiet --release -- "$vector")
     echo "crates.io: $crate@$version verifies"
   else
     echo "::warning::crates.io does not serve $crate@$version"
@@ -343,7 +378,7 @@ registries() {
     "${PYTHON:-python3}" -m venv "$work/py"
     python=$work/py/bin/python
     [ -x "$python" ] || python=$work/py/Scripts/python.exe
-    "$python" -m pip install --quiet --no-cache-dir --index-url https://pypi.org/simple --only-binary :all: "$crate==$pep440"
+    retry "$python" -m pip install --quiet --no-cache-dir --index-url https://pypi.org/simple --only-binary :all: "$crate==$pep440"
     "$python" "$tools/scripts/consumers/py/verify.py" "$vector"
     echo "PyPI: $crate==$pep440 verifies"
   else
@@ -360,5 +395,6 @@ case $phase in
   npm) npm_publish "${1:?directory}" "${2:-}" ;;
   crate) crate_publish "${1:-}" ;;
   registries) registries ;;
+  preflight) preflight ;;
   *) fail "unknown phase: $phase" ;;
 esac

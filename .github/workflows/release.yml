@@ -21,7 +21,8 @@ name: release
 # Registry credentials. None is stored once a registry trusts this workflow: npm, crates.io and
 # PyPI each accept this run's OIDC identity for Bitspark/thesmos, release.yml and the `release`
 # environment. Each is armed by a repository variable, so a registry that is not configured yet
-# gets a warning instead of a red release, and a re-dispatch publishes only what is missing:
+# gets a warning instead of a red release, and a re-dispatch publishes only what is missing (as
+# does "Re-run failed jobs", which keeps the run's commit):
 #   npm        vars.NPM_TRUSTED_PUBLISHING, with provenance
 #   crates.io  vars.CRATES_IO_TRUSTED_PUBLISHING, through rust-lang/crates-io-auth-action
 #   PyPI       vars.PYPI_TRUSTED_PUBLISHING, with attestations; PyPI accepts a pending publisher
@@ -29,7 +30,8 @@ name: release
 # version is published by this same job with a bootstrap token the service desk places in the
 # `release` environment (NPM_BOOTSTRAP_TOKEN, CARGO_BOOTSTRAP_TOKEN) and removes afterwards; that
 # npm version carries no provenance. Provenance and attestations name the commit this workflow runs
-# at, so trusted publishing is refused unless main is at the release commit when it is dispatched.
+# at, so an armed npm or PyPI that still lacks the version needs main at the release commit when
+# this is dispatched; the check job refuses anything else before approval, before any write.
 on:
   workflow_dispatch:
     inputs:
@@ -103,6 +105,15 @@ jobs:
           COMMIT: ${{ inputs.commit }}
           RUN: ${{ inputs.qualifying_run }}
           ATTEMPT: ${{ inputs.qualifying_attempt }}
+      - name: The registries this release may publish to, from this commit
+        if: inputs.mode == 'release'
+        run: bash scripts/release/release.sh preflight "$VERSION" "$COMMIT"
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          ARMED_REGISTRIES: >-
+            ${{ vars.NPM_TRUSTED_PUBLISHING == 'true' && 'npm' || '' }}
+            ${{ vars.PYPI_TRUSTED_PUBLISHING == 'true' && 'pypi' || '' }}
       - name: Rehearse the npm and crates.io uploads
         run: |
           bash scripts/release/release.sh npm "$VERSION" "$COMMIT" "$RUNNER_TEMP/candidate" --dry-run
@@ -140,22 +151,37 @@ jobs:
       - name: The pinned Rust
         id: rust
         run: echo "toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' core/py/rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-      - uses: PyO3/maturin-action@v1
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           working-directory: core/py
           target: ${{ matrix.target }}
           manylinux: auto
           rust-toolchain: ${{ steps.rust.outputs.toolchain }}
+          # The maturin that check.yml's python job builds with.
+          maturin-version: v1.15.0
           args: --release --locked --out dist
+      # The oldest and newest CPython that check.yml tests.
       - uses: actions/setup-python@v5
+        id: py310
         with:
           python-version: '3.10'
-      - name: Install the wheel and verify the Archon proof with it
+      - uses: actions/setup-python@v5
+        id: py313
+        with:
+          python-version: '3.13'
+      - name: Install the wheel and verify the Archon proof with it, on CPython 3.10 and 3.13
         run: |
-          python -m venv "$RUNNER_TEMP/venv"
-          py="$RUNNER_TEMP/venv/bin/python"; [ -x "$py" ] || py="$RUNNER_TEMP/venv/Scripts/python.exe"
-          "$py" -m pip install --no-index --find-links core/py/dist bitspark-thesmos
-          "$py" scripts/consumers/py/verify.py core/rs/tests/data/archon-document.ontos
+          for python in "$PY310" "$PY313"; do
+            venv="$RUNNER_TEMP/venv-$("$python" -c 'import sys; print(sys.version_info[1])')"
+            "$python" -m venv "$venv"
+            py="$venv/bin/python"; [ -x "$py" ] || py="$venv/Scripts/python.exe"
+            "$py" -m pip install --no-index --find-links core/py/dist bitspark-thesmos
+            "$py" -c 'import sys; print(sys.version)'
+            "$py" scripts/consumers/py/verify.py core/rs/tests/data/archon-document.ontos
+          done
+        env:
+          PY310: ${{ steps.py310.outputs.python-path }}
+          PY313: ${{ steps.py313.outputs.python-path }}
       - uses: actions/upload-artifact@v4
         with:
           name: python-wheel-${{ matrix.name }}
@@ -172,10 +198,11 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
-      - uses: PyO3/maturin-action@v1
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           working-directory: core/py
           command: sdist
+          maturin-version: v1.15.0
           args: --out dist
       - uses: actions/setup-python@v5
         with:
@@ -200,11 +227,29 @@ jobs:
       contents: write
       # Trusted publishing on npm, crates.io and PyPI; npm provenance and PyPI attestations.
       id-token: write
+    outputs:
+      registries: ${{ steps.record.outputs.registries }}
+    env:
+      REGISTRY_RECORD: ${{ runner.temp }}/registries
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      # npm 11.5.1 or later exchanges this run's OIDC identity for publish rights when npm trusts
+      # this workflow, so trusted mode sets no NODE_AUTH_TOKEN.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: The registries this release may publish to, from this commit
+        run: bash scripts/release/release.sh preflight "$VERSION" "$COMMIT"
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          ARMED_REGISTRIES: >-
+            ${{ vars.NPM_TRUSTED_PUBLISHING == 'true' && 'npm' || '' }}
+            ${{ vars.PYPI_TRUSTED_PUBLISHING == 'true' && 'pypi' || '' }}
       - uses: actions/download-artifact@v4
         with:
           name: release-candidate-${{ inputs.version }}
@@ -215,12 +260,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           COMMIT: ${{ inputs.commit }}
-      # npm 11.5.1 or later exchanges this run's OIDC identity for publish rights when npm trusts
-      # this workflow, so trusted mode sets no NODE_AUTH_TOKEN.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
       - name: Publish the npm archive
         run: bash scripts/release/release.sh npm "$VERSION" "$COMMIT" "$RUNNER_TEMP/candidate"
         env:
@@ -231,7 +270,7 @@ jobs:
       - name: A crates.io token from this run's identity
         id: crates-io
         if: vars.CRATES_IO_TRUSTED_PUBLISHING == 'true'
-        uses: rust-lang/crates-io-auth-action@v1
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
       - name: Publish the crate
         run: bash scripts/release/release.sh crate "$VERSION" "$COMMIT"
         env:
@@ -252,25 +291,40 @@ jobs:
           for f in "$RUNNER_TEMP"/python/*; do
             case $(basename "$f") in bitspark_thesmos-"$pep440"[-.]*) ;; *) echo "::error::$f is not bitspark-thesmos $pep440"; exit 1 ;; esac
           done
-          if curl -sf "https://pypi.org/pypi/bitspark-thesmos/$pep440/json" >/dev/null; then
-            echo "PyPI already serves bitspark-thesmos $pep440; skip-existing uploads only what is missing"
-          fi
-          if [ "$ARMED" = true ] && [ "$GITHUB_SHA" != "$COMMIT" ]; then
-            echo "::error::this run is at $GITHUB_SHA, not the release commit $COMMIT, so the attestations would name the wrong source"
+          served=$(curl -sf "https://pypi.org/pypi/bitspark-thesmos/$pep440/json" | jq -r '.urls[].filename' || true)
+          missing=0
+          for f in "$RUNNER_TEMP"/python/*; do grep -qxF "$(basename "$f")" <<<"$served" || missing=$((missing + 1)); done
+          if [ "$missing" = 0 ]; then
+            echo "PyPI already serves all five files of bitspark-thesmos $pep440"
+            echo "pypi" >> "$REGISTRY_RECORD"
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+          elif [ "$ARMED" != true ]; then
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_SHA" != "$COMMIT" ]; then
+            echo "::error::PyPI lacks $missing file(s) and this run is at $GITHUB_SHA, not the release commit $COMMIT, so their attestations would name the wrong source"
             exit 1
+          else
+            echo "upload=true" >> "$GITHUB_OUTPUT"
           fi
         env:
           VERSION: ${{ inputs.version }}
           COMMIT: ${{ inputs.commit }}
           ARMED: ${{ vars.PYPI_TRUSTED_PUBLISHING == 'true' }}
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        if: vars.PYPI_TRUSTED_PUBLISHING == 'true'
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        if: steps.python.outputs.upload == 'true'
         with:
           packages-dir: ${{ runner.temp }}/python
           skip-existing: true
+      - name: PyPI got them
+        if: steps.python.outputs.upload == 'true'
+        run: echo "pypi" >> "$REGISTRY_RECORD"
       - name: What PyPI did not get
         if: vars.PYPI_TRUSTED_PUBLISHING != 'true'
         run: echo "::warning::bitspark-thesmos was built but not published to PyPI because vars.PYPI_TRUSTED_PUBLISHING is not 'true'"
+      - name: The registries that serve this release
+        id: record
+        if: always()
+        run: echo "registries=$(sort -u "$REGISTRY_RECORD" 2>/dev/null | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
   verify:
     needs: publish
     if: always() && (inputs.mode == 'verify' || needs.publish.result == 'success')
@@ -305,7 +359,9 @@ jobs:
           VERSION: ${{ inputs.version }}
           COMMIT: ${{ inputs.commit }}
           PYTHON: python
+          # What this run's publish job published or found, and every armed registry.
           EXPECT_REGISTRIES: >-
+            ${{ needs.publish.outputs.registries }}
             ${{ vars.NPM_TRUSTED_PUBLISHING == 'true' && 'npm' || '' }}
             ${{ vars.CRATES_IO_TRUSTED_PUBLISHING == 'true' && 'crates' || '' }}
             ${{ vars.PYPI_TRUSTED_PUBLISHING == 'true' && 'pypi' || '' }}
