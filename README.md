@@ -17,10 +17,10 @@ is not a public npm release: each GitHub release attaches the npm package as an 
 
 The [v1.0.0-preview.7 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.7)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
-of preview.6 (the Go, Rust and C/C++ receivers), every receiver now builds from
-public sources: Logos's contract 0.25.0 is public on npmjs.org, crates.io and as
-a Go module, so Go, Rust, C/C++ and Python need no Logos access, and the npm
-package's required dependencies install from npmjs.org without credentials. It
+of preview.6 (the Go, Rust and C/C++ receivers), no receiver needs Logos
+access: Logos's contract 0.25.0 is public on npmjs.org, crates.io and as a Go
+module, so Go, Rust, C/C++ and Python build from public sources, and the npm
+package installs from npmjs.org without credentials. It
 adds the Python receiver `core/py`, the Rust receiver behind PyO3, built from
 source with
 `pip install "git+https://github.com/Bitspark/thesmos@v1.0.0-preview.7#subdirectory=core/py"`.
@@ -32,8 +32,9 @@ receiver to decide the same seeded inputs identically (TypeScript, Go, Rust,
 Python and C++), and builds each one as a consumer gets it. The Go module is
 tagged `core/go/v1.0.0-preview.7`; Rust, C/C++ and Python use the
 `v1.0.0-preview.7` tag. Its complete gate passed 119 TypeScript tests and every
-receiver's tests, and preserved all eight frozen artifacts. The `/client` and
-`/archon` entries still require their optional peers at the versions below.
+receiver's tests, and preserved all eight frozen artifacts. The `/client` entry
+still requires the optional, private peer `@bitspark/logos-kernel@0.25.0`, and
+`/archon` the public `@bitspark/archon@0.16.0`.
 
 With existing GitHub Packages read access, install the committed lockfile and
 run the complete gate:
