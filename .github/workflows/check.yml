@@ -57,6 +57,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # The job's token can read packages; no later step needs it in .git/config.
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -226,6 +228,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # The job's token can read packages; no later step needs it in .git/config.
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: core/go/go.mod
@@ -264,8 +268,9 @@ jobs:
     # FetchContent. Each verifies the TypeScript-signed Archon proof and denies it with one
     # changed byte: scripts/consumers/run.sh. It builds the commit rather than a tag because a
     # release is qualified before it is tagged, on a commit whose core/ tree the tag carries.
-    # The consumers fetch that commit from this repository, where a fork's pull request head is
-    # not, so this job runs on this repository's own pull requests only.
+    # The consumers clone thesmos at that commit (CMake's FetchContent among them), and a fork's
+    # pull request head is on no branch of this repository, so this job runs on this
+    # repository's own pull requests only.
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !inputs.refresh_lock
     runs-on: ubuntu-latest
     permissions:

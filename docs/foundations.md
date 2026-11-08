@@ -26,7 +26,7 @@ without a Logos checker binds an existing receiver instead of porting the checke
 C and C++ (`core/cpp`) and Python (`core/py`) bind the Rust receiver, so they decide
 exactly as it does.
 Ontos 0.13.0 is pinned to match the selected Logos 0.25.0 dependency cohort;
-the inspected Ontos main reports 0.14.0. Upgrading one side alone can produce
+newer Ontos releases exist (0.16.0 on npm and crates.io). Upgrading one side alone can produce
 incompatible JavaScript class identities even when the value semantics agree.
 
 Archon's signing-capability API also supports external custodians. This first
