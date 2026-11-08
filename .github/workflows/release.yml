@@ -57,6 +57,9 @@ permissions:
 concurrency:
   group: release-${{ inputs.version }}
   cancel-in-progress: false
+env:
+  # The maturin that check.yml's python job builds with, from PyPI.
+  MATURIN: maturin==1.15.0
 jobs:
   check:
     if: inputs.mode != 'verify'
@@ -129,16 +132,27 @@ jobs:
   wheels:
     # One abi3 wheel per platform for CPython 3.10 and later, built from the release commit, each
     # installed on its own platform's runner and run against the Archon proof before upload.
+    # maturin comes from PyPI and Rust from rustup at the pinned toolchain, so no build downloads
+    # a GitHub release asset anonymously. Linux wheels are built and tested in the manylinux2014
+    # images, with their own CPython 3.10 and 3.13; on macOS and Windows, setup-python fetches
+    # CPython with the job's token. Every build names its target, as maturin-action did, so the
+    # wheel's SBOM lists only the crates compiled for that platform.
     if: inputs.mode != 'verify'
     needs: check
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64 }
-          - { name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64 }
+          - name: linux-x86_64
+            os: ubuntu-latest
+            image: quay.io/pypa/manylinux2014_x86_64
+            target: x86_64-unknown-linux-gnu
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux2014_aarch64
+            target: aarch64-unknown-linux-gnu
           - { name: macos-universal2, os: macos-latest, target: universal2-apple-darwin }
-          - { name: windows-x64, os: windows-latest, target: x64 }
+          - { name: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -148,28 +162,52 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
-      - name: The pinned Rust
-        id: rust
-        run: echo "toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' core/py/rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          working-directory: core/py
-          target: ${{ matrix.target }}
-          manylinux: auto
-          rust-toolchain: ${{ steps.rust.outputs.toolchain }}
-          # The maturin that check.yml's python job builds with.
-          maturin-version: v1.15.0
-          args: --release --locked --out dist
+      - name: Build the manylinux2014 wheel, and verify the Archon proof with it on CPython 3.10 and 3.13
+        if: matrix.image
+        run: docker run --rm -v "$PWD:/io" -w /io/core/py -e MATURIN -e TARGET "$IMAGE" bash -euo pipefail -c "$SCRIPT"
+        env:
+          IMAGE: ${{ matrix.image }}
+          TARGET: ${{ matrix.target }}
+          # Runs inside the container, as one argument to bash -c.
+          SCRIPT: |
+            # rustup reads core/py/rust-toolchain.toml: the pinned channel and its components.
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+            . "$HOME/.cargo/env"
+            rustup toolchain install && rustup show active-toolchain
+            /opt/python/cp310-cp310/bin/python -m pip install --quiet "$MATURIN"
+            /opt/python/cp310-cp310/bin/maturin build --release --locked --compatibility manylinux2014 --target "$TARGET" --out dist
+            for python in /opt/python/cp310-cp310/bin/python /opt/python/cp313-cp313/bin/python; do
+              venv=$(mktemp -d)
+              "$python" -m venv "$venv"
+              "$venv/bin/python" -m pip install --quiet --no-index --find-links dist bitspark-thesmos
+              "$venv/bin/python" -c 'import sys; print(sys.version)'
+              "$venv/bin/python" /io/scripts/consumers/py/verify.py /io/core/rs/tests/data/archon-document.ontos
+            done
       # The oldest and newest CPython that check.yml tests.
       - uses: actions/setup-python@v5
+        if: '!matrix.image'
         id: py310
         with:
           python-version: '3.10'
       - uses: actions/setup-python@v5
+        if: '!matrix.image'
         id: py313
         with:
           python-version: '3.13'
+      - name: Build the wheel
+        if: '!matrix.image'
+        working-directory: core/py
+        run: |
+          # rustup reads core/py/rust-toolchain.toml: the pinned channel and its components.
+          rustup toolchain install && rustup show active-toolchain
+          if [ "$TARGET" = universal2-apple-darwin ]; then rustup target add aarch64-apple-darwin x86_64-apple-darwin; fi
+          "$PY310" -m pip install --quiet "$MATURIN"
+          "$PY310" -m maturin build --release --locked --target "$TARGET" --out dist
+        env:
+          PY310: ${{ steps.py310.outputs.python-path }}
+          TARGET: ${{ matrix.target }}
       - name: Install the wheel and verify the Archon proof with it, on CPython 3.10 and 3.13
+        if: '!matrix.image'
         run: |
           for python in "$PY310" "$PY313"; do
             venv="$RUNNER_TEMP/venv-$("$python" -c 'import sys; print(sys.version_info[1])')"
@@ -189,7 +227,9 @@ jobs:
           if-no-files-found: error
   sdist:
     # The source distribution, built from the release commit, then built from itself into a wheel
-    # as pip would for a platform without a wheel, and run against the Archon proof.
+    # as pip would for a platform without a wheel, and run against the Archon proof. Like the
+    # Linux wheels, it is made and tested in the manylinux2014 image with its own CPython 3.10,
+    # maturin from PyPI and Rust from rustup, so it downloads no GitHub release asset.
     if: inputs.mode != 'verify'
     needs: check
     runs-on: ubuntu-latest
@@ -198,21 +238,25 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          working-directory: core/py
-          command: sdist
-          maturin-version: v1.15.0
-          args: --out dist
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Build the sdist and verify the Archon proof with it
-        run: |
-          (cd core/py && rustup toolchain install && rustup show active-toolchain)
-          python -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/python" -m pip install --no-binary bitspark-thesmos core/py/dist/*.tar.gz
-          "$RUNNER_TEMP/venv/bin/python" scripts/consumers/py/verify.py core/rs/tests/data/archon-document.ontos
+      - name: Build the sdist, build it into a wheel, and verify the Archon proof with it
+        run: docker run --rm -v "$PWD:/io" -w /io/core/py -e MATURIN quay.io/pypa/manylinux2014_x86_64 bash -euo pipefail -c "$SCRIPT"
+        env:
+          # Runs inside the container, as one argument to bash -c.
+          SCRIPT: |
+            python=/opt/python/cp310-cp310/bin/python
+            # maturin sdist reads the crate through cargo, so Rust comes first.
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+            . "$HOME/.cargo/env"
+            rustup toolchain install && rustup show active-toolchain
+            # pip builds the sdist in a directory of its own, outside the toolchain file, with the
+            # default Rust, as on a machine that has Rust: here the pinned minimum.
+            rustup default "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+            "$python" -m pip install --quiet "$MATURIN"
+            "$python" -m maturin sdist --out dist
+            venv=$(mktemp -d)
+            "$python" -m venv "$venv"
+            "$venv/bin/python" -m pip install --quiet --no-binary bitspark-thesmos dist/*.tar.gz
+            "$venv/bin/python" /io/scripts/consumers/py/verify.py /io/core/rs/tests/data/archon-document.ontos
       - uses: actions/upload-artifact@v4
         with:
           name: python-sdist
