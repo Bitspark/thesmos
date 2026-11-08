@@ -217,7 +217,9 @@ jobs:
           if-no-files-found: error
   sdist:
     # The source distribution, built from the release commit, then built from itself into a wheel
-    # as pip would for a platform without a wheel, and run against the Archon proof.
+    # as pip would for a platform without a wheel, and run against the Archon proof. Like the
+    # Linux wheels, it is made and tested in the manylinux2014 image with its own CPython 3.10,
+    # maturin from PyPI and Rust from rustup, so it downloads nothing from GitHub.
     if: inputs.mode != 'verify'
     needs: check
     runs-on: ubuntu-latest
@@ -226,20 +228,19 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Build the sdist with maturin from PyPI
-        working-directory: core/py
+      - name: Build the sdist, build it into a wheel, and verify the Archon proof with it
         run: |
-          python -m pip install --quiet maturin==1.15.0
-          python -m maturin sdist --out dist
-      - name: Build the sdist and verify the Archon proof with it
-        run: |
-          (cd core/py && rustup toolchain install && rustup show active-toolchain)
-          python -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/python" -m pip install --no-binary bitspark-thesmos core/py/dist/*.tar.gz
-          "$RUNNER_TEMP/venv/bin/python" scripts/consumers/py/verify.py core/rs/tests/data/archon-document.ontos
+          docker run --rm -v "$PWD:/io" -w /io/core/py quay.io/pypa/manylinux2014_x86_64 bash -euo pipefail -c '
+            python=/opt/python/cp310-cp310/bin/python
+            "$python" -m pip install --quiet maturin==1.15.0
+            "$python" -m maturin sdist --out dist
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+            . "$HOME/.cargo/env"
+            rustup toolchain install && rustup show active-toolchain
+            venv=$(mktemp -d)
+            "$python" -m venv "$venv"
+            "$venv/bin/python" -m pip install --quiet --no-binary bitspark-thesmos dist/*.tar.gz
+            "$venv/bin/python" /io/scripts/consumers/py/verify.py /io/core/rs/tests/data/archon-document.ontos'
       - uses: actions/upload-artifact@v4
         with:
           name: python-sdist
