@@ -3,8 +3,8 @@
 The Spaces authority receiver: it verifies a supplied proof for a query the receiver
 constructs, under the frozen law, revision 3. It is the same receiver as the
 TypeScript package and the Go module, so all of them accept the same proofs. It runs
-no search, network or clock. Logos's Rust checker (`logos-contract`) makes the
-decision; thesmos itself has no hand-written authority rule.
+no search, network or clock. The decision is made by the Rust checker of logos
+(`logos-contract`); thesmos itself has no hand-written authority rule.
 
 ```toml
 [dependencies]
@@ -21,11 +21,11 @@ if !decision.permitted {
 }
 ```
 
-Values are Ontos values (`thesmos::Value`), built with `path`, `fact`, `symbol`,
-`list` and `authorization`. The Archon adapter is the default feature `archon`. With
+Values are ontos values (`thesmos::Value`), built with `path`, `fact`, `symbol`,
+`list` and `authorization`. The archon adapter is the default feature `archon`. With
 `default-features = false`, you supply your own
-`Fn(&Bundle, &Value) -> bool + Send + Sync + 'static`. It establishes key identity
-only, never authority. Any failure denies, including a panic in that adapter (under the
+`Fn(&Bundle, &Value) -> bool + Send + Sync + 'static`. An adapter establishes key
+identity only, never authority. Any failure denies, including a panic in that adapter (under the
 default `panic = "unwind"`). The crate needs Rust 1.96 or later.
 
 The model, the other receivers and the release notes are at
