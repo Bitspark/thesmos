@@ -20,7 +20,7 @@ provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
 of preview.6 (the Go, Rust and C/C++ receivers), no receiver needs Logos
 access: Logos's contract 0.25.0 is public on npmjs.org, crates.io and as a Go
 module, so Go, Rust, C/C++ and Python build from public sources, and the npm
-package installs from npmjs.org without credentials. It
+package's required dependencies install from npmjs.org without credentials. It
 adds the Python receiver `core/py`, the Rust receiver behind PyO3, built from
 source with
 `pip install "git+https://github.com/Bitspark/thesmos@v1.0.0-preview.7#subdirectory=core/py"`.
