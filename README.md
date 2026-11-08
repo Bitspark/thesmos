@@ -10,34 +10,28 @@ This repository contains none of its history or runtime compatibility paths.
 ## Status
 
 Source preview, Node 24. The checker, asserter layer, optional Archon adapter
-and Logos proof client are implemented. The required `@bitspark/logos-contract@0.25.0`
-and Ontos 0.13.0 are public on npmjs.org. The optional client dependency
-`@bitspark/logos-kernel@0.25.0` is still a private GitHub package. This source preview
-is not a public npm release: each GitHub release attaches the npm package as an archive.
+and Logos proof client are implemented. From preview.8, each release is published to
+npm as `@bitspark/thesmos` and to crates.io and PyPI as `bitspark-thesmos` (preview.7 is
+on npm and crates.io); a preview is a pre-release, `1.0.0rcN` on PyPI. The required `@bitspark/logos-contract@0.25.0` and Ontos
+0.13.0 are public on npmjs.org. The optional client dependency
+`@bitspark/logos-kernel@0.25.0` is still a private GitHub package.
 
-The [v1.0.0-preview.7 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.7)
-provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
-of preview.6 (the Go, Rust and C/C++ receivers), no receiver needs Logos
-access: Logos's contract 0.25.0 is public on npmjs.org, crates.io and as a Go
-module, so Go, Rust, C/C++ and Python build from public sources, and the npm
-package's required dependencies install from npmjs.org without credentials. It
-adds the Python receiver `core/py`, the Rust receiver behind PyO3, built from
-source with
-`pip install "git+https://github.com/Bitspark/thesmos@v1.0.0-preview.7#subdirectory=core/py"`.
-The C ABI's authentication callback now returns `int32_t`
-(`THESMOS_AUTHENTICATED`, `THESMOS_NOT_AUTHENTICATED`, `THESMOS_ADAPTER_FAILED`),
-so an adapter that fails denies as `invalid-proof`, as in every receiver: C
-callers return the constants, C++ callers only recompile. CI requires every
-receiver to decide the same seeded inputs identically (TypeScript, Go, Rust,
-Python and C++), and builds each one as a consumer gets it. The Go module is
-tagged `core/go/v1.0.0-preview.7`; Rust, C/C++ and Python use the
-`v1.0.0-preview.7` tag. Its complete gate passed 119 TypeScript tests and every
-receiver's tests, and preserved all eight frozen artifacts. The `/client` entry
-still requires the optional, private peer `@bitspark/logos-kernel@0.25.0`, and
+The [v1.0.0-preview.8 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.8)
+is the first that the release workflow publishes to all three registries, with npm
+provenance and PyPI attestations: `npm install @bitspark/thesmos`,
+`bitspark-thesmos = "=1.0.0-preview.8"` from crates.io, and
+`pip install --pre bitspark-thesmos` with wheels for Linux, macOS and Windows. Its
+receivers, frozen law and proof format are unchanged from preview.7, which made every
+receiver build without Logos access and added the Python receiver; preview.7's npm package
+and crate are on the registries too. The Go module is tagged `core/go/v1.0.0-preview.8`,
+and C/C++ builds from the `v1.0.0-preview.8` tag. Its complete gate passed 119 TypeScript
+tests and every receiver's tests, and preserved all eight frozen artifacts. The `/client`
+entry still requires the optional, private peer `@bitspark/logos-kernel@0.25.0`, and
 `/archon` the public `@bitspark/archon@0.16.0`.
 
-With existing GitHub Packages read access, install the committed lockfile and
-run the complete gate:
+Install it with `npm install @bitspark/thesmos`, and `@bitspark/archon@0.16.0` for the
+Archon adapter. To work on thesmos itself, with existing GitHub Packages read access,
+install the committed lockfile and run the complete gate:
 
 ```sh
 npm ci --allow-remote=all
@@ -155,8 +149,10 @@ Rust programs verify the same proofs with the crate `bitspark-thesmos` (library
 
 ```toml
 [dependencies]
-thesmos = { package = "bitspark-thesmos", git = "https://github.com/Bitspark/thesmos", tag = "v<version>" }
+thesmos = { package = "bitspark-thesmos", version = "=<version>" }
 ```
+
+From crates.io, or as a git dependency at the tag `v<version>`.
 
 ```rust
 use thesmos::{archon, Query, Verifier};
@@ -229,9 +225,11 @@ is `invalid-proof`, as in every receiver; KeyboardInterrupt and SystemExit propa
 the built-in Archon adapter without calling back into Python. Verification releases the
 GIL. Its tests run `law/conformance.ontos` and the TypeScript-signed Archon proof.
 
-No wheel is published yet (#12). Build it from source with Rust 1.96, for example
+Install it from PyPI with `pip install --pre bitspark-thesmos`, or name a version:
+`1.0.0rcN` is the preview `1.0.0-preview.N`. PyPI has abi3 wheels for CPython 3.10 and
+later on Linux (x86_64 and aarch64, manylinux2014), macOS (universal2) and Windows (x64),
+and an sdist that builds elsewhere with Rust 1.96. From source:
 `pip install "git+https://github.com/Bitspark/thesmos@v<version>#subdirectory=core/py"`.
-Its PEP 440 version reads `1.0.0rcN` for the preview `1.0.0-preview.N`.
 
 Run `npm run build && npm run example`. The
 [document service](examples/document-service.ts) carries root → team → docs

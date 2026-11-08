@@ -38,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "bitspark-thesmos"
-version = "1.0.0-preview.7"
+version = "1.0.0-preview.8"
 dependencies = [
  "bitspark-archon-core",
  "bitspark-ontos-codec",

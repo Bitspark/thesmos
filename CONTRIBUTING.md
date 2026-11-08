@@ -143,8 +143,8 @@ Treat test fixtures as evidence, not permission to change the model.
 Node 24 is required. The SDK's development dependencies include Logos's kernel, which
 is published only as a private GitHub package, so the lockfile installs the `@bitspark`
 scope from GitHub Packages with read access; see README.md. Never commit a credential or an npm configuration
-containing one. Public package publication waits for an anonymous dependency
-installation test. No public npm release is implied by a source preview.
+containing one. Packages reach the registries only through `release.yml`, whose `verify`
+installs each one anonymously; a source preview is published as a pre-release.
 
 For a dependency update, the `check` workflow's `refresh_lock` dispatch prepares
 the lockfile on its runner and retains it as `thesmos-lock-<source revision>`.
