@@ -236,6 +236,9 @@ jobs:
             curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
             . "$HOME/.cargo/env"
             rustup toolchain install && rustup show active-toolchain
+            # pip builds the sdist in a directory of its own, outside the toolchain file, with
+            # the default Rust, as on a machine that has Rust: here the pinned minimum.
+            rustup default "$(rustup show active-toolchain | cut -d" " -f1)"
             "$python" -m pip install --quiet maturin==1.15.0
             "$python" -m maturin sdist --out dist
             venv=$(mktemp -d)
