@@ -100,22 +100,41 @@ workflow makes the release and checks this rule itself:
 2. The PR's `check` run on its head is the qualifying run.
 3. The PR is squash-merged. The merge commit on main is the release commit, and its
    `check` run builds the npm archive.
-4. Dispatch `release` from main with the version, the release commit and the
-   qualifying run and attempt, in mode `rehearse`, then `release`. Both modes check
-   through the API that the qualifying run succeeded on a commit with the release
-   commit's `core/` tree, and that each of its receiver jobs ran every step. They also
-   check that every version
-   field at the release commit agrees and that the tags are absent or already at the
-   release commit. `release` then waits for approval in the `release` environment. It
-   creates `v<version>` and `core/go/v<version>` at the release commit and the GitHub
-   release with the archive, `release-manifest.json` and `SHA256SUMS`, or finishes a
-   partial release; it never moves a tag or replaces a file. It ends with `verify`,
-   which can also be dispatched alone: the tags resolve to the release commit
-   (`run.sh tag`) and the files match `SHA256SUMS`.
+4. While main is still at the release commit, dispatch `release` from main with the
+   version, the release commit and the qualifying run and attempt, in mode `rehearse`,
+   then `release`. Both modes check through the API that the qualifying run succeeded on
+   a commit with the release commit's `core/` tree, and that each of its receiver jobs
+   ran every step. They also check that every version field at the release commit agrees
+   and that the tags are absent or already at the release commit. Both build the Python
+   wheels (Linux x86_64 and aarch64, macOS universal2, Windows x64) and the sdist from the
+   release commit, and install each and run it against the Archon proof. `rehearse` dry-runs
+   the npm and crates.io uploads.
+5. `release` then waits for approval in the `release` environment. It creates
+   `v<version>` and `core/go/v<version>` at the release commit and the GitHub release with
+   the archive, `release-manifest.json` and `SHA256SUMS`, or finishes a partial release; it
+   never moves a tag or replaces a file. It then publishes what each registry does not have
+   yet: the release's exact npm archive to npm as `@bitspark/thesmos` (dist-tag `preview`
+   for a preview), `bitspark-thesmos` to crates.io from the release commit, and the wheels
+   and sdist to PyPI as `bitspark-thesmos` (`1.0.0rcN` for `1.0.0-preview.N`).
+6. It ends with `verify`, which can also be dispatched alone. It checks that the tags
+   resolve to the release commit (`run.sh tag`) and that the files match `SHA256SUMS`. It
+   then installs anonymously from each registry that serves the version, checks that npm
+   serves exactly the release's archive, and verifies the Archon proof with each.
 
-`bash scripts/release/release.sh check|candidate|publish --dry-run|verify` runs the same
-steps locally with an authenticated `gh`. It publishes to no package registry yet (#49,
-#12).
+The registries trust `release.yml` in the `release` environment through OIDC, so no
+registry token is stored. Each registry is armed by a repository variable
+(`NPM_TRUSTED_PUBLISHING`, `CRATES_IO_TRUSTED_PUBLISHING`, `PYPI_TRUSTED_PUBLISHING`);
+until it is, `release` warns and publishes nothing there, and a later dispatch fills it in.
+npm provenance and PyPI attestations name the commit the workflow runs at, which is why it
+must run while main is at the release commit; trusted publishing refuses any other.
+npm and crates.io attach a trusted publisher only to a package that exists, so the first
+version of each is published by this same job with a bootstrap token that the service desk
+places in the `release` environment and removes afterwards; that npm version has no
+provenance. `rehearse` and `verify` write nothing and run from any branch, which is how a
+change to this workflow is tried before it merges; `release` runs from main only.
+
+`bash scripts/release/release.sh check|candidate|publish --dry-run|verify|npm --dry-run|crate --dry-run|registries`
+runs the same steps locally with an authenticated `gh`.
 Treat test fixtures as evidence, not permission to change the model.
 
 Node 24 is required. The SDK's development dependencies include Logos's kernel, which

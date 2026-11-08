@@ -8,6 +8,9 @@
 #   bash scripts/release/release.sh candidate <version> <commit> <run> <attempt> <dir>
 #   bash scripts/release/release.sh publish   <version> <commit> <dir> [--dry-run]
 #   bash scripts/release/release.sh verify    <version> <commit>
+#   bash scripts/release/release.sh npm       <version> <commit> <dir> [--dry-run]
+#   bash scripts/release/release.sh crate     <version> <commit> [--dry-run]
+#   bash scripts/release/release.sh registries <version> <commit>
 #
 # check      The release commit is on main, carries <version> in every field (its own
 #            `embed-law.mjs --check-rs`) and has notes in docs/releases/v<version>.md. The
@@ -23,6 +26,20 @@
 #            file: anything present that differs stops it.
 # verify     Reads only: the tags resolve to the release commit (git and proxy.golang.org), and
 #            the release's files match its SHA256SUMS and carry <version>.
+# npm        Publishes the candidate's archive, the release's exact npm file, to npmjs.org, unless
+#            that version is already there. NPM_PUBLISH says how: `trusted` (OIDC, with
+#            provenance, only in a run at the release commit), `bootstrap` (NODE_AUTH_TOKEN, no
+#            provenance: the first version, before a trusted publisher can exist) or `off`.
+#            Previews get the dist-tag `preview`. --dry-run packs and checks without uploading.
+# crate      Publishes bitspark-thesmos from the release commit to crates.io with
+#            CARGO_REGISTRY_TOKEN (minted from OIDC, or a bootstrap token), unless that version is
+#            already there. --dry-run packages and builds it without uploading.
+# registries Reads only: each registry that serves <version> (npm, crates.io, PyPI) is installed
+#            from anonymously in a fresh project, which must verify the TypeScript-signed Archon
+#            proof and deny it with one changed byte; npm must serve exactly the release's
+#            archive. A registry named in EXPECT_REGISTRIES (for example "npm crates pypi") that
+#            does not serve <version> within ten minutes fails it; any other is reported.
+#            PyPI's version is the PEP 440 form: 1.0.0-preview.N is 1.0.0rcN.
 set -euo pipefail
 
 fail() { echo "release: $*" >&2; exit 1; }
@@ -215,11 +232,133 @@ verify() {
   echo "verified: $tag at $commit, $(wc -l < "$scratch/release/SHA256SUMS") files match SHA256SUMS"
 }
 
+npm_name=@bitspark/thesmos
+crate=bitspark-thesmos
+pep440=${version/-preview./rc}
+ua="thesmos-release (github.com/Bitspark/thesmos)"
+npmjs=https://registry.npmjs.org
+
+on_npm() { npm view "$npm_name@$version" version --registry "$npmjs" --@bitspark:registry="$npmjs" >/dev/null 2>&1; }
+on_crates() { curl -sf -A "$ua" "https://crates.io/api/v1/crates/$crate/$version" >/dev/null 2>&1; }
+on_pypi() { curl -sf "https://pypi.org/pypi/$crate/$pep440/json" >/dev/null 2>&1; }
+
+# Provenance and attestations name the commit the workflow runs at, so a run anywhere else would
+# attribute the package to the wrong source.
+at_release_commit() {
+  [ "${GITHUB_SHA:-}" = "$commit" ] ||
+    fail "this run is at ${GITHUB_SHA:-no commit}, not the release commit $commit, so provenance would name the wrong source: dispatch release.yml while main is at the release commit"
+}
+
+npm_publish() {
+  local dir=$1 dry=${2:-} mode=${NPM_PUBLISH:-off} tag=latest
+  [[ $version == *-* ]] && tag=preview
+  (cd "$dir" && sha256sum --quiet -c SHA256SUMS) || fail "$dir does not match its SHA256SUMS"
+  [ -f "$dir/$package" ] || fail "$dir has no $package"
+  if [ "$dry" = --dry-run ]; then
+    npm publish "$dir/$package" --dry-run --access public --tag "$tag" --provenance=false --registry "$npmjs" --@bitspark:registry="$npmjs"
+    echo "npm: would publish $npm_name@$version (dist-tag $tag) as '$mode'"
+    return
+  fi
+  if on_npm; then echo "npm: $npm_name@$version is already published"; return; fi
+  case $mode in
+    trusted)
+      at_release_commit
+      npm publish "$dir/$package" --access public --tag "$tag" --provenance --registry "$npmjs" --@bitspark:registry="$npmjs" ;;
+    bootstrap)
+      [ -n "${NODE_AUTH_TOKEN:-}" ] || fail "an npm bootstrap needs NODE_AUTH_TOKEN"
+      npm publish "$dir/$package" --access public --tag "$tag" --provenance=false --registry "$npmjs" --@bitspark:registry="$npmjs" ;;
+    off)
+      echo "::warning::npm: $npm_name@$version was not published: neither trusted publishing (vars.NPM_TRUSTED_PUBLISHING) nor a bootstrap token is configured"
+      return ;;
+    *) fail "NPM_PUBLISH must be trusted, bootstrap or off, not $mode" ;;
+  esac
+  echo "npm: published $npm_name@$version (dist-tag $tag, $mode)"
+}
+
+crate_publish() {
+  local dry=${1:-} manifest
+  if [ "$dry" != --dry-run ]; then
+    if on_crates; then echo "crates.io: $crate@$version is already published"; return; fi
+    if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+      echo "::warning::crates.io: $crate@$version was not published: neither trusted publishing (vars.CRATES_IO_TRUSTED_PUBLISHING) nor a bootstrap token is configured"
+      return
+    fi
+  fi
+  release_tree
+  manifest=$(sed -n 's/^version = "\(.*\)"/\1/p' "$scratch/tree/core/rs/Cargo.toml" | head -1)
+  [ "$manifest" = "$version" ] || fail "core/rs/Cargo.toml at $commit is $manifest, not $version"
+  (cd "$scratch/tree/core/rs" && rustup toolchain install >/dev/null && cargo publish --locked $dry)
+  if [ "$dry" = --dry-run ]; then echo "crates.io: $crate@$version packages and builds"
+  else echo "crates.io: published $crate@$version"; fi
+}
+
+# Polls a registry that has accepted a version but may not serve it yet.
+served() {
+  local check=$1 name=$2 expected=$3 i
+  for i in $(seq 1 60); do
+    "$check" && return 0
+    [ "$expected" = yes ] || return 1
+    echo "$name does not serve $version yet (try $i/60)"; sleep 10
+  done
+  fail "$name did not serve $version within ten minutes"
+}
+
+expects() { [[ " ${EXPECT_REGISTRIES:-} " == *" $1 "* ]] && echo yes || echo no; }
+
+registries() {
+  local work=$scratch/registries vector archon python
+  release_tree
+  vector=$scratch/tree/core/rs/tests/data/archon-document.ontos
+  archon=$(cd "$scratch/tree" && node -p 'require("./package.json").devDependencies["@bitspark/archon"]')
+  mkdir -p "$work"
+  if served on_npm npm "$(expects npm)"; then
+    mkdir -p "$work/npm/served"
+    : > "$work/npm/empty.npmrc"
+    (cd "$work/npm" && npm init -y >/dev/null &&
+      npm install --userconfig "$work/npm/empty.npmrc" --registry "$npmjs" --@bitspark:registry="$npmjs" \
+        --no-audit --no-fund --ignore-scripts "$npm_name@$version" "@bitspark/archon@$archon" >/dev/null &&
+      npm pack "$npm_name@$version" --userconfig "$work/npm/empty.npmrc" --registry "$npmjs" \
+        --@bitspark:registry="$npmjs" --pack-destination "$work/npm/served" >/dev/null)
+    gh release download "$tag" -R "$repo" -p "$package" -D "$work/npm/release" --clobber
+    cmp -s "$work/npm/served/$package" "$work/npm/release/$package" ||
+      fail "npm serves a $npm_name@$version that differs from the release's $package"
+    cp "$tools/scripts/consumers/ts/verify.mjs" "$work/npm/"
+    (cd "$work/npm" && node verify.mjs "$vector")
+    echo "npm: $npm_name@$version is the release's archive and verifies"
+  else
+    echo "::warning::npm does not serve $npm_name@$version"
+  fi
+  if served on_crates crates.io "$(expects crates)"; then
+    mkdir -p "$work/rs/src"
+    sed "s|^thesmos = .*|thesmos = { package = \"$crate\", version = \"=$version\" }|" \
+      "$tools/scripts/consumers/rs/Cargo.toml.in" > "$work/rs/Cargo.toml"
+    cp "$tools/scripts/consumers/rs/main.rs" "$work/rs/src/main.rs"
+    cp "$scratch/tree/core/rs/rust-toolchain.toml" "$work/rs/"
+    (cd "$work/rs" && rustup toolchain install >/dev/null && cargo run --quiet --release -- "$vector")
+    echo "crates.io: $crate@$version verifies"
+  else
+    echo "::warning::crates.io does not serve $crate@$version"
+  fi
+  if served on_pypi PyPI "$(expects pypi)"; then
+    "${PYTHON:-python3}" -m venv "$work/py"
+    python=$work/py/bin/python
+    [ -x "$python" ] || python=$work/py/Scripts/python.exe
+    "$python" -m pip install --quiet --no-cache-dir --index-url https://pypi.org/simple --only-binary :all: "$crate==$pep440"
+    "$python" "$tools/scripts/consumers/py/verify.py" "$vector"
+    echo "PyPI: $crate==$pep440 verifies"
+  else
+    echo "::warning::PyPI does not serve $crate==$pep440"
+  fi
+}
+
 shift 3
 case $phase in
   check) check "${1:-}" "${2:-}" ;;
   candidate) candidate "${1:-}" "${2:-}" "${3:?directory}" ;;
   publish) publish "${1:?directory}" "${2:-}" ;;
   verify) verify ;;
+  npm) npm_publish "${1:?directory}" "${2:-}" ;;
+  crate) crate_publish "${1:-}" ;;
+  registries) registries ;;
   *) fail "unknown phase: $phase" ;;
 esac
