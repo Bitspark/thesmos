@@ -10,10 +10,10 @@ This repository contains none of its history or runtime compatibility paths.
 ## Status
 
 Source preview, Node 24. The checker, asserter layer, optional Archon adapter
-and Logos proof client are implemented. **An anonymous npm install is not yet
-available:** the required `@bitspark/logos-contract@0.24.0` and optional client
-dependency `@bitspark/logos-kernel@0.24.0` are currently private GitHub packages.
-This source preview is not a public npm release. Other dependencies are public.
+and Logos proof client are implemented. The required `@bitspark/logos-contract@0.25.0`
+and Ontos 0.13.0 are public on npmjs.org. The optional client dependency
+`@bitspark/logos-kernel@0.25.0` is still a private GitHub package. This source preview
+is not a public npm release: each GitHub release attaches the npm package as an archive.
 
 The [v1.0.0-preview.6 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.6)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
@@ -43,7 +43,7 @@ npm run check
 
 Keep the existing credential in the normal user or CI secret store. Do not add
 credentials to this repository. The lockfile selects exact Logos artifacts;
-Ontos stays on 0.13.0 to share the same Value implementation as Logos 0.24.0.
+Ontos stays on 0.13.0 to share the same Value implementation as Logos 0.25.0.
 
 ## Receiver and caller
 
@@ -138,13 +138,12 @@ if !decision.Permitted {
 It is the receiver only: it checks supplied proofs and runs no search. Like the
 TypeScript verifier, it hand-writes no authority rule. It embeds the frozen law
 and layer as data and leaves the decision to Logos's Go checker
-(`github.com/Bitspark/logos/contract/go` v0.24.0), with Ontos v0.13.0 values and
+(`github.com/Bitspark/logos-contract/contract/go` v0.25.0), with Ontos v0.13.0 values and
 archon's Go core v0.16.0 for the same `thesmos/space-facts/v1` signatures. Its tests
 run the frozen corpus `law/conformance.ontos` and an Archon-signed proof made by
 the TypeScript SDK, which the TypeScript suite checks too, so both receivers accept
 the same bytes. Go module versions are tagged `core/go/v<version>` with the same
-version as the npm package. The Logos module is private: set
-`GOPRIVATE=github.com/Bitspark/logos` and give git read access to that repository.
+version as the npm package. Every module it requires is public.
 
 ### Rust receiver
 
@@ -167,14 +166,12 @@ if !decision.permitted {
 ```
 
 It is the same receiver as the Go module: no search, no hand-written authority rule,
-and the decision left to Logos's Rust checker (`logos-contract` at tag `v0.24.0`),
+and the decision left to Logos's Rust checker (`logos-contract` 0.25.0 from crates.io),
 with Ontos 0.13.0 values and `bitspark-archon-core` 0.16.0. The Archon adapter is the
 default feature `archon`; with `default-features = false` you supply your own
 `Fn(&Bundle, &Value) -> bool + Send + Sync + 'static`. It needs Rust 1.96 or later.
 Its tests run `law/conformance.ontos` and the same TypeScript-signed Archon proof
-as Go, on Windows, Linux and macOS. `logos-contract` is not on crates.io and comes
-from the private Logos repository: give git read access to it and set
-`CARGO_NET_GIT_FETCH_WITH_CLI=true` to use your git credentials.
+as Go, on Windows, Linux and macOS. Its dependencies all come from crates.io.
 
 ### C and C++ receiver
 
@@ -204,7 +201,7 @@ bytes. `thesmos::Verifier(root, callback)` takes your own authentication adapter
 denies as `authentication-failed`, and an exception it throws denies as `invalid-proof`, as a
 failing adapter does in every other receiver. No exception or panic crosses the C boundary.
 Its tests run `law/conformance.ontos` through a C++ adapter and the TypeScript-signed Archon proof
-through the built-in one. Building needs the same Logos access as the Rust crate.
+through the built-in one. Building needs only the Rust crate's public dependencies.
 
 ### Python receiver
 
@@ -229,11 +226,9 @@ is `invalid-proof`, as in every receiver; KeyboardInterrupt and SystemExit propa
 the built-in Archon adapter without calling back into Python. Verification releases the
 GIL. Its tests run `law/conformance.ontos` and the TypeScript-signed Archon proof.
 
-A wheel would hold compiled Logos code, so none is published while Logos is private.
-Build it from source with the same Logos access as the Rust crate, for example
-`pip install "git+https://github.com/Bitspark/thesmos@v<version>#subdirectory=core/py"`
-with `CARGO_NET_GIT_FETCH_WITH_CLI=true` (and Rust 1.96). Its PEP 440 version reads
-`1.0.0rcN` for the preview `1.0.0-preview.N`.
+No wheel is published yet (#12). Build it from source with Rust 1.96, for example
+`pip install "git+https://github.com/Bitspark/thesmos@v<version>#subdirectory=core/py"`.
+Its PEP 440 version reads `1.0.0rcN` for the preview `1.0.0-preview.N`.
 
 Run `npm run build && npm run example`. The
 [document service](examples/document-service.ts) carries root → team → docs

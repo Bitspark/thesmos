@@ -227,8 +227,9 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "logos-contract"
-version = "0.24.0"
-source = "git+https://github.com/Bitspark/logos?tag=v0.24.0#ef7be38fbf9b60aaf6e8f3a9b248e0f51b547912"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e924fc1d0f7fe3fce727ca5b9176e8d366facebb63d4e69055d3b0dd43b507c2"
 dependencies = [
  "bitspark-ontos-codec",
  "bitspark-ontos-core",

@@ -7,20 +7,19 @@
 #   bash scripts/consumers/run.sh verify <commit> <dir>
 #   bash scripts/consumers/run.sh tag <commit> <version>
 #
-# prepare is the only phase that needs read access to the private Logos sources. It fetches thesmos
-# at <commit> into <dir>/thesmos, makes a fresh Go module and Rust crate that require it at that
-# commit, and fetches what their builds need. pip and CMake clone thesmos themselves in verify,
-# and their Cargo builds resolve core/py's and core/cpp's own Cargo.lock, so prepare fetches those
-# locked sources into CARGO_HOME from the same commit. Go needs GOPRIVATE to name
-# github.com/Bitspark/logos and github.com/Bitspark/thesmos (the module proxy need not serve an
-# unmerged commit).
+# prepare is the only phase that fetches Go modules and Rust crates. It fetches thesmos at <commit>
+# into <dir>/thesmos, makes a fresh Go module and Rust crate that require it at that commit, and
+# fetches what their builds need. pip and CMake clone thesmos themselves in verify, and their Cargo
+# builds resolve core/py's and core/cpp's own Cargo.lock, so prepare fetches those locked sources
+# into CARGO_HOME from the same commit. Go needs GOPRIVATE to name github.com/Bitspark/thesmos: the
+# module proxy need not serve an unmerged commit.
 #
-# verify runs without Logos access, with Cargo and Go offline: go run, cargo run, pip install
+# verify runs with Cargo and Go offline: go run, cargo run, pip install
 # "git+…@<commit>#subdirectory=core/py" into a fresh virtual environment, and a CMake project
 # with FetchContent at <commit>. pip still fetches its build backend, and CMake its sources.
 #
 # A release is qualified before it is tagged, usually on its PR head. After tagging, tag checks
-# without Logos access that the tags consumers name resolve to <commit>, the release commit on
+# that the tags consumers name resolve to <commit>, the release commit on
 # main that the tags point to (with squash merges not the qualified PR head, whose core/ tree it
 # carries): the root tag v<version> (Cargo, pip, FetchContent) through git, and the Go module's
 # core/go/v<version> through proxy.golang.org, as a Go consumer resolves it.

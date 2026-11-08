@@ -85,4 +85,4 @@ it must either produce a valid proof or report that precise capacity stop,
 never infer prohibition. The runnable concrete-operation profile must produce
 proofs for both vocabularies and pass all missing-support checks. This is a
 measured search limitation, not a restriction on the law or authored syntax;
-`prove`'s `memoryLimitPages` option (Logos 0.24.0) raises the ceiling to at most 1 GiB.
+`prove`'s `memoryLimitPages` option (since Logos 0.24.0) raises the ceiling to at most 1 GiB.

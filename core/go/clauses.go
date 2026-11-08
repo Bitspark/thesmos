@@ -3,7 +3,7 @@ package thesmos
 import (
 	"errors"
 
-	logos "github.com/Bitspark/logos/contract/go"
+	logos "github.com/Bitspark/logos-contract/contract/go"
 )
 
 func bindings(names []string, terms ...logos.Term) logos.Subst {

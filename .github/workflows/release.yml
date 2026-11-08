@@ -1,9 +1,9 @@
 name: release
 # Releases a qualified, merged release commit: its tags and its GitHub release with the npm archive
-# that check.yml built from it, a release manifest and SHA256SUMS (CONTRIBUTING.md). It never
-# receives the Logos token and runs no receiver tests: it checks through the API that the
-# qualifying check.yml run had Logos access in every Logos job, on a commit with the release
-# commit's core/ tree. No package registry is published to while Logos is private (#49, #12).
+# that check.yml built from it, a release manifest and SHA256SUMS (CONTRIBUTING.md). It runs no
+# receiver tests: it checks through the API that every receiver job of the qualifying check.yml
+# run ran every step, on a commit with the release commit's core/ tree. It publishes to no package
+# registry yet (#49, #12).
 #
 # Dispatched from main only; there is no tag trigger. A release pushes two tags, which would
 # trigger one.
@@ -25,7 +25,7 @@ on:
         description: The release commit, the release PR's squash merge on main (full hash)
         required: true
       qualifying_run:
-        description: The check.yml run with Logos access on the release PR's head (rehearse and release)
+        description: The check.yml run on the release PR's head (rehearse and release)
         required: false
       qualifying_attempt:
         description: That run's attempt

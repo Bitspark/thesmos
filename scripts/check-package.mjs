@@ -15,7 +15,8 @@ assert(pack.files.some(file => file.path === "dist/core/ts/src/client.d.ts"));
 assert(pack.files.some(file => file.path === "dist/core/ts/src/identity.d.ts"));
 assert(pack.files.some(file => file.path === "dist/core/ts/src/remote.d.ts"));
 assert(pack.files.every(file => !/node_modules|test\/|examples\/|\.git\//.test(file.path)));
-// The lockfile's dependency URLs preserve the selected private Logos artifacts.
+// The lockfile's dependency URLs preserve the selected Logos artifacts (the kernel is still a
+// private GitHub package).
 // Use an independent package installation, not workspace imports.
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));

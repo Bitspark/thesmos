@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 
-	logos "github.com/Bitspark/logos/contract/go"
+	logos "github.com/Bitspark/logos-contract/contract/go"
 	codec "github.com/bitspark/ontos/codec/go"
 	core "github.com/bitspark/ontos/core/go"
 )

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# The release steps, none of which needs Logos access. .github/workflows/release.yml runs them;
-# each also runs locally with an authenticated gh. A release is qualified on its release PR's head
-# by a check.yml run that had Logos access, squash-merged into main, and released from that merge
-# commit, the release commit (CONTRIBUTING.md).
+# The release steps. .github/workflows/release.yml runs them; each also runs locally with an
+# authenticated gh. A release is qualified on its release PR's head by a check.yml run in which
+# every receiver job ran, squash-merged into main, and released from that merge commit, the release
+# commit (CONTRIBUTING.md).
 #
 #   bash scripts/release/release.sh check     <version> <commit> <run> <attempt>
 #   bash scripts/release/release.sh candidate <version> <commit> <run> <attempt> <dir>
@@ -12,8 +12,8 @@
 # check      The release commit is on main, carries <version> in every field (its own
 #            `embed-law.mjs --check-rs`) and has notes in docs/releases/v<version>.md. The
 #            qualifying run, attempt <attempt> of check.yml run <run>, succeeded on a commit with
-#            the same core/ tree, and each of its Logos jobs succeeded without skipping a step: a
-#            run without the token skips their fetch or test steps. v<version> and
+#            the same core/ tree, and each of its receiver jobs succeeded without skipping a step
+#            (a fork's pull request skips the differential and consumer jobs). v<version> and
 #            core/go/v<version> are absent or already at the release commit.
 # candidate  After check, writes to <dir> the npm archive that check.yml's sdk job built and tested from the
 #            release commit (its push run on main), release-manifest.json and SHA256SUMS. Given
@@ -40,8 +40,8 @@ package=bitspark-thesmos-$version.tgz
 scratch=$(mktemp -d)
 trap 'git -C "$tools" worktree remove --force "$scratch/tree" >/dev/null 2>&1 || true; rm -rf "$scratch"' EXIT
 
-# The jobs that need Logos access, as check.yml names them. A release needs all of them.
-logos_jobs=(go "rust (windows-latest)" "rust (ubuntu-latest)" "rust (macos-latest)"
+# The receiver jobs, as check.yml names them. A release needs all of them.
+receiver_jobs=(go "rust (windows-latest)" "rust (ubuntu-latest)" "rust (macos-latest)"
   "cpp (ubuntu-latest)" "cpp (macos-latest)"
   "python (windows-latest, 3.10)" "python (windows-latest, 3.13)" "python (ubuntu-latest, 3.10)"
   "python (ubuntu-latest, 3.13)" "python (macos-latest, 3.10)" "python (macos-latest, 3.13)"
@@ -78,13 +78,13 @@ qualify() {
     fail "core/ differs between the qualifying head $head and $commit"
   jobs=$(gh api "repos/$repo/actions/runs/$run/attempts/$attempt/jobs?per_page=100" \
     --jq '.jobs[] | [.name, .conclusion, ([.steps[] | select(.conclusion != "success")] | length)] | @tsv')
-  for job in "${logos_jobs[@]}"; do
+  for job in "${receiver_jobs[@]}"; do
     line=$(awk -F'\t' -v name="$job" '$1 == name' <<<"$jobs")
     [ -n "$line" ] || fail "run $run attempt $attempt has no job '$job'"
     [ "$(cut -f2,3 <<<"$line")" = $'success\t0' ] ||
-      fail "'$job' in run $run attempt $attempt did not run every step successfully: was the Logos token installed?"
+      fail "'$job' in run $run attempt $attempt did not run every step successfully"
   done
-  echo "qualified: run $run attempt $attempt on $head (core/ equals $commit's), ${#logos_jobs[@]} Logos jobs ran every step"
+  echo "qualified: run $run attempt $attempt on $head (core/ equals $commit's), ${#receiver_jobs[@]} receiver jobs ran every step"
 }
 
 check() {
