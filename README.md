@@ -10,9 +10,9 @@ This repository contains none of its history or runtime compatibility paths.
 ## Status
 
 Source preview, Node 24. The checker, asserter layer, optional Archon adapter
-and Logos proof client are implemented. Each release is published to npm as
-`@bitspark/thesmos` and to crates.io and PyPI as `bitspark-thesmos`; a preview is a
-pre-release, `1.0.0rcN` on PyPI. The required `@bitspark/logos-contract@0.25.0` and Ontos
+and Logos proof client are implemented. From preview.8, each release is published to
+npm as `@bitspark/thesmos` and to crates.io and PyPI as `bitspark-thesmos` (preview.7 is
+on npm and crates.io); a preview is a pre-release, `1.0.0rcN` on PyPI. The required `@bitspark/logos-contract@0.25.0` and Ontos
 0.13.0 are public on npmjs.org. The optional client dependency
 `@bitspark/logos-kernel@0.25.0` is still a private GitHub package.
 

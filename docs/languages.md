@@ -72,4 +72,4 @@ Go, Rust, C/C++ and Python build from public sources only: Logos's contract come
 | Toolchain | [Node 24](../package.json#L7) | [Go 1.25](../core/go/go.mod#L3) | [Rust 1.96](../core/rs/rust-toolchain.toml#L5) | [C++20](../core/cpp/CMakeLists.txt#L33) and [Rust 1.96](../core/cpp/rust-toolchain.toml#L4) | [Python 3.10+](../core/py/pyproject.toml#L9) and [Rust 1.96](../core/py/rust-toolchain.toml#L4) |
 | Private dependencies | only the optional `@bitspark/logos-kernel` for `/client`, through GitHub Packages | none | none | none | none |
 
-Each release is published to npm, crates.io and PyPI by its release workflow, and attaches the npm archive with `SHA256SUMS` to its GitHub release; the Go module's tag resolves through proxy.golang.org. See [CONTRIBUTING.md](../CONTRIBUTING.md) for how a release is made.
+From preview.8, each release is published to npm, crates.io and PyPI by its release workflow (preview.7 is on npm and crates.io), and attaches the npm archive with `SHA256SUMS` to its GitHub release; the Go module's tag resolves through proxy.golang.org. See [CONTRIBUTING.md](../CONTRIBUTING.md) for how a release is made.
