@@ -15,23 +15,26 @@ and Ontos 0.13.0 are public on npmjs.org. The optional client dependency
 `@bitspark/logos-kernel@0.25.0` is still a private GitHub package. This source preview
 is not a public npm release: each GitHub release attaches the npm package as an archive.
 
-The [v1.0.0-preview.6 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.6)
+The [v1.0.0-preview.7 release](https://github.com/Bitspark/thesmos/releases/tag/v1.0.0-preview.7)
 provides the qualified archive, exact CI evidence and SHA-256 checksum. On top
-of preview.5 (the law embedded at build time and Archon 0.16.0), it adds
-receivers in three more languages that verify the same proofs with no Node
-runtime: Go (`github.com/Bitspark/thesmos/core/go`, tagged
-`core/go/v1.0.0-preview.6`), Rust (the crate `bitspark-thesmos` in `core/rs`, at
-the `v1.0.0-preview.6` tag) and C and C++ (`core/cpp`, the Rust receiver behind a
-C ABI with a header-only C++20 wrapper, built from source by CMake at the same
-tag). Each delegates checking to Logos's checker in its language and passes
-`law/conformance.ontos` and the TypeScript-signed Archon proof. It also lets a
-proof-producing host select its Logos search implementation through the
-`search` option. The npm package's dependencies are unchanged from preview.5.
-Its complete gate passed 119 TypeScript tests and the Go, Rust and C/C++
-receivers' tests, and preserved all eight frozen artifacts. Consumers need the
-stated Logos access; release archives bundle no private dependency code. The
-`/client` and `/archon` entries still require their optional peers at the
-versions below.
+of preview.6 (the Go, Rust and C/C++ receivers), no receiver needs Logos
+access: Logos's contract 0.25.0 is public on npmjs.org, crates.io and as a Go
+module, so Go, Rust, C/C++ and Python build from public sources, and the npm
+package's required dependencies install from npmjs.org without credentials. It
+adds the Python receiver `core/py`, the Rust receiver behind PyO3, built from
+source with
+`pip install "git+https://github.com/Bitspark/thesmos@v1.0.0-preview.7#subdirectory=core/py"`.
+The C ABI's authentication callback now returns `int32_t`
+(`THESMOS_AUTHENTICATED`, `THESMOS_NOT_AUTHENTICATED`, `THESMOS_ADAPTER_FAILED`),
+so an adapter that fails denies as `invalid-proof`, as in every receiver: C
+callers return the constants, C++ callers only recompile. CI requires every
+receiver to decide the same seeded inputs identically (TypeScript, Go, Rust,
+Python and C++), and builds each one as a consumer gets it. The Go module is
+tagged `core/go/v1.0.0-preview.7`; Rust, C/C++ and Python use the
+`v1.0.0-preview.7` tag. Its complete gate passed 119 TypeScript tests and every
+receiver's tests, and preserved all eight frozen artifacts. The `/client` entry
+still requires the optional, private peer `@bitspark/logos-kernel@0.25.0`, and
+`/archon` the public `@bitspark/archon@0.16.0`.
 
 With existing GitHub Packages read access, install the committed lockfile and
 run the complete gate:
