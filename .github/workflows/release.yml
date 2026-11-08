@@ -130,8 +130,9 @@ jobs:
     # One abi3 wheel per platform for CPython 3.10 and later, built from the release commit, each
     # installed on its own platform's runner and run against the Archon proof before upload.
     # maturin comes from PyPI at the version check.yml's python job builds with, and Rust from
-    # rustup at the pinned toolchain, so the build downloads nothing from GitHub release assets.
-    # Linux wheels are built in the manylinux2014 images, as manylinux2014 wheels.
+    # rustup at the pinned toolchain, so no wheel build downloads a GitHub release asset. Linux
+    # wheels are built and tested in the manylinux2014 images, with their own CPython 3.10 and
+    # 3.13, so a Linux job downloads nothing from GitHub at all.
     if: inputs.mode != 'verify'
     needs: check
     strategy:
@@ -153,42 +154,50 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
+      - name: Build the manylinux2014 wheel, and verify the Archon proof with it on CPython 3.10 and 3.13
+        if: matrix.image
+        run: |
+          docker run --rm -v "$PWD:/io" -w /io/core/py -e MATURIN "$IMAGE" bash -euo pipefail -c '
+            # rustup reads core/py/rust-toolchain.toml: the pinned channel and its components.
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+            . "$HOME/.cargo/env"
+            rustup toolchain install && rustup show active-toolchain
+            /opt/python/cp310-cp310/bin/python -m pip install --quiet "$MATURIN"
+            /opt/python/cp310-cp310/bin/maturin build --release --locked --compatibility manylinux2014 --out dist
+            for python in /opt/python/cp310-cp310/bin/python /opt/python/cp313-cp313/bin/python; do
+              venv=$(mktemp -d)
+              "$python" -m venv "$venv"
+              "$venv/bin/python" -m pip install --quiet --no-index --find-links dist bitspark-thesmos
+              "$venv/bin/python" -c "import sys; print(sys.version)"
+              "$venv/bin/python" /io/scripts/consumers/py/verify.py /io/core/rs/tests/data/archon-document.ontos
+            done'
+        env:
+          IMAGE: ${{ matrix.image }}
       # The oldest and newest CPython that check.yml tests.
       - uses: actions/setup-python@v5
+        if: '!matrix.image'
         id: py310
         with:
           python-version: '3.10'
       - uses: actions/setup-python@v5
+        if: '!matrix.image'
         id: py313
         with:
           python-version: '3.13'
-      - name: The pinned Rust
-        id: rust
-        run: echo "toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' core/py/rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-      - name: Build the manylinux2014 wheel
-        if: matrix.image
-        run: |
-          docker run --rm -v "$PWD:/io" -w /io/core/py -e MATURIN -e TOOLCHAIN "$IMAGE" bash -euo pipefail -c '
-            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$TOOLCHAIN"
-            . "$HOME/.cargo/env"
-            /opt/python/cp310-cp310/bin/python -m pip install --quiet "$MATURIN"
-            /opt/python/cp310-cp310/bin/maturin build --release --locked --compatibility manylinux2014 --out dist'
-        env:
-          IMAGE: ${{ matrix.image }}
-          TOOLCHAIN: ${{ steps.rust.outputs.toolchain }}
       - name: Build the wheel
         if: '!matrix.image'
         working-directory: core/py
         run: |
-          rustup toolchain install "$TOOLCHAIN" --profile minimal
-          if [ -n "$TARGET" ]; then rustup target add --toolchain "$TOOLCHAIN" aarch64-apple-darwin x86_64-apple-darwin; fi
+          # rustup reads core/py/rust-toolchain.toml: the pinned channel and its components.
+          rustup toolchain install && rustup show active-toolchain
+          if [ -n "$TARGET" ]; then rustup target add aarch64-apple-darwin x86_64-apple-darwin; fi
           "$PY310" -m pip install --quiet "$MATURIN"
           "$PY310" -m maturin build --release --locked --out dist ${TARGET:+--target "$TARGET"}
         env:
           PY310: ${{ steps.py310.outputs.python-path }}
-          TOOLCHAIN: ${{ steps.rust.outputs.toolchain }}
           TARGET: ${{ matrix.target }}
       - name: Install the wheel and verify the Archon proof with it, on CPython 3.10 and 3.13
+        if: '!matrix.image'
         run: |
           for python in "$PY310" "$PY313"; do
             venv="$RUNNER_TEMP/venv-$("$python" -c 'import sys; print(sys.version_info[1])')"
